@@ -5,14 +5,18 @@ import "core:strings"
 import "core:math"
 import "core:math/rand"
 import rl "vendor:raylib"
+import "core:container/queue"
+import "core:slice"
 
 COLS : i32 : 18
 ROWS : i32 : 7
-WINDOW_WIDTH : i32 : 800
-WINDOW_HEIGHT : i32 : 600
-SCALE : f32 : 2 
-WORLD_WIDTH : i32 : 70
-WORLD_HEIGHT : i32 : 50
+WINDOW_WIDTH : i32 : 1280
+WINDOW_HEIGHT : i32 : 720
+scale : f32 = 2 
+WORLD_WIDTH : i32 : 1280
+WORLD_HEIGHT : i32 : 720
+CLUSTER_SIZE :: 10
+CLUSTER_COUNT :: 500
 
 Player :: struct { 
     x : i32,
@@ -31,6 +35,46 @@ world : [WORLD_WIDTH][WORLD_HEIGHT]Tile
 char_width : i32 
 char_height : i32
 font_texture : rl.Texture2D
+count_useless : i32 = 0
+
+cluster_generation :: proc(tile : Tile) {
+    count_useless = 0
+    cx := rand.int31_max(WORLD_WIDTH)
+    cy := rand.int31_max(WORLD_HEIGHT)
+
+    tovisit : queue.Queue([2]i32) 
+
+    queue.push_back(&tovisit, [2]i32{cx, cy})
+    visited : [dynamic][2]i32
+    for queue.len(tovisit) > 0 {
+        ci := queue.pop_front(&tovisit)
+         
+        if slice.contains(visited[:], ci) do continue
+        append(&visited, ci)
+        // y = -x/10+1
+        if rand.float32() >= f32(-count_useless)/CLUSTER_SIZE+1 do continue
+
+        // y = -log(x/10)
+        // if rand.float32() >= -math.log10(f32(count_useless)/CLUSTER_SIZE) do continue      
+        
+        if(ci.x - 1 != -1) {
+            queue.push_back(&tovisit, [2]i32{ci.x-1, ci.y})
+        }
+        if(ci.x + 1 != WORLD_WIDTH) {
+            queue.push_back(&tovisit, [2]i32{ci.x+1, ci.y})
+        }
+        if(ci.y - 1 != -1) {
+            queue.push_back(&tovisit, [2]i32{ci.x, ci.y-1})
+        }
+        if(ci.y + 1 != WORLD_HEIGHT) {
+            queue.push_back(&tovisit, [2]i32{ci.x, ci.y+1})
+        }
+        world[ci.x][ci.y] = tile
+        count_useless += 1
+    }
+    
+    fmt.println(count_useless)
+}
 
 draw_text :: proc(text: string, pos: rl.Vector2, scale: f32) {
     for i := 0; i < len(text); i+=1 {
@@ -71,19 +115,21 @@ main :: proc() {
     char_width = font_texture.width / COLS;
     char_height = font_texture.height / ROWS;
     
-    rows : i32 = i32(f32(WINDOW_HEIGHT) / (f32(char_height) * SCALE));
-    cols : i32 = i32(f32(WINDOW_WIDTH) / (f32(char_width) * SCALE));
+    rows : i32 = i32(f32(WINDOW_HEIGHT) / (f32(char_height) * scale))
+    cols : i32 = i32(f32(WINDOW_WIDTH) / (f32(char_width) * scale))
 
+    player.x = WORLD_WIDTH / 2
+    player.y = WORLD_HEIGHT / 2
     
-    player.x = cols / 2
-    player.y = rows / 2
+    for i in 0..<CLUSTER_COUNT {
+        cluster_generation(Tile(rand.int31_max(4)))
+    }
     
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
         rl.ClearBackground(rl.GetColor(0x202020FF))
         // rl.DrawTextEx(font, "abcdefghijklmnopqrstuvwxyz", {0, 0}, 80, 0, rl.WHITE)
         // rl.DrawTextEx(font, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", {0, 80}, 80, 0, rl.WHITE)        
-
         if rl.IsKeyDown(rl.KeyboardKey.UP) && player.y > 0 {
             player.y -= 1
         }
@@ -96,43 +142,62 @@ main :: proc() {
         if rl.IsKeyDown(rl.KeyboardKey.DOWN) && player.y < WORLD_HEIGHT - 1{
             player.y += 1
         }
+        if rl.IsKeyDown(rl.KeyboardKey.MINUS) {
+            // scale = scale*0.9
+            scale = max(1, scale*0.9)
+            rows = i32(f32(WINDOW_HEIGHT) / (f32(char_height) * scale))
+            cols = i32(f32(WINDOW_WIDTH) / (f32(char_width) * scale))
+        }
+        if rl.IsKeyDown(rl.KeyboardKey.EQUAL) {
+            // scale = scale*1.1
+            scale = min(scale*1.1, 20)
+            rows = i32(f32(WINDOW_HEIGHT) / (f32(char_height) * scale))
+            cols = i32(f32(WINDOW_WIDTH) / (f32(char_width) * scale))
+        }
 
-        for i : i32 = 0; i < WORLD_WIDTH; i += 1 {
-            for j : i32 = 0; j < WORLD_HEIGHT; j += 1 {
-                 #partial switch world[i][j] {
+        for i : i32 = max(0, player.x - cols/2); i < min(player.x + cols/2, WORLD_WIDTH); i += 1 {
+            for j : i32 = max(0, player.y - rows/2); j < min(player.y + rows/2, WORLD_HEIGHT); j += 1 {
+                #partial switch world[i][j] {
                     case .NONE:
-                        draw_char(' ', {f32((i - player.x + cols/2) * char_width) * SCALE, f32((j - player.y + rows/2) * char_height) * SCALE}, SCALE)
+                        draw_char(' ', {f32((i - player.x + cols/2) * char_width) * scale, f32((j - player.y + rows/2) * char_height) * scale}, scale)
+                    case .IRON:
+                        draw_char('I', {f32((i - player.x + cols/2) * char_width) * scale, f32((j - player.y + rows/2) * char_height) * scale}, scale)
+                    case .TUNGSTEN:
+                        draw_char('T', {f32((i - player.x + cols/2) * char_width) * scale, f32((j - player.y + rows/2) * char_height) * scale}, scale)
+                    case .COAL:
+                        draw_char('C', {f32((i - player.x + cols/2) * char_width) * scale, f32((j - player.y + rows/2) * char_height) * scale}, scale)
                     case:
                         unimplemented("BRUH!")
                 }
             }
         }
 
+
         // PLAYER
-        draw_char('@', {f32(cols/2 * char_width) * SCALE,  f32(rows/2 * char_height) * SCALE}, SCALE)
+        draw_char('@', {f32(cols/2 * char_width) * scale,  f32(rows/2 * char_height) * scale}, scale)
 
         // SETKA
         for i : i32 = 0; i < cols; i += 1 {
             if (i == 0 || i == cols - 1) {
-                draw_char('+', {(f32(i * char_width) * SCALE), 0}, f32(SCALE))
+                draw_char('+', {(f32(i * char_width) * scale), 0}, f32(scale))
             } else {
-                draw_char('-', {(f32(i * char_width) * SCALE), 0}, f32(SCALE))
+                draw_char('-', {(f32(i * char_width) * scale), 0}, f32(scale))
             }
         }
         for i : i32 = 0; i < cols; i += 1 {
             if (i == 0 || i == cols - 1) {
-                draw_char('+', {(f32(i * char_width) * SCALE), f32((rows - 1) * char_height) * SCALE}, SCALE)
+                draw_char('+', {(f32(i * char_width) * scale), f32((rows - 1) * char_height) * scale}, scale)
             } else {
-                draw_char('-', {(f32(i * char_width) * SCALE), f32((rows - 1) * char_height) * SCALE}, SCALE)
+                draw_char('-', {(f32(i * char_width) * scale), f32((rows - 1) * char_height) * scale}, scale)
             }
         }
         for i : i32 = 1; i < rows - 1; i += 1 {
-            draw_char('|', {0, cast(f32) (i * char_height) * SCALE}, SCALE)
+            draw_char('|', {0, cast(f32) (i * char_height) * scale}, scale)
         }
         for i : i32 = 1; i < rows - 1; i += 1 {
-            draw_char('|', {(f32((cols - 1) * char_width) * SCALE), f32(i * char_height) * SCALE}, SCALE)
+            draw_char('|', {(f32((cols - 1) * char_width) * scale), f32(i * char_height) * scale}, scale)
         }
-        
+        rl.DrawFPS(14,14)
         rl.EndDrawing()
     }    
 }
