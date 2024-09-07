@@ -7,35 +7,38 @@ import "core:math/rand"
 import rl "vendor:raylib"
 import "core:container/queue"
 import "core:slice"
+import "base:runtime"
 
 COLS : i32 : 18
 ROWS : i32 : 7
 WINDOW_WIDTH : i32 : 1280
 WINDOW_HEIGHT : i32 : 720
 scale : f32 = 2 
-WORLD_WIDTH : i32 : 1280
-WORLD_HEIGHT : i32 : 720
-CLUSTER_SIZE :: 10
-CLUSTER_COUNT :: 500
+WORLD_WIDTH : i32 : 230000
+WORLD_HEIGHT : i32 : 230000
+CLUSTER_SIZE :: 100
+CLUSTER_COUNT :: 10000
 
 Player :: struct { 
     x : i32,
     y : i32,
 }
 
-Tile :: enum {
+Tile :: enum (u8){
     NONE,
     IRON,
     TUNGSTEN,
     COAL,
 }
 
-world : [WORLD_WIDTH][WORLD_HEIGHT]Tile 
+world : ^[WORLD_WIDTH][WORLD_HEIGHT]Tile 
+err : runtime.Allocator_Error
 
 char_width : i32 
 char_height : i32
 font_texture : rl.Texture2D
 count_useless : i32 = 0
+count_clusters_sizes : [CLUSTER_SIZE]i32 
 
 cluster_generation :: proc(tile : Tile) {
     count_useless = 0
@@ -72,8 +75,9 @@ cluster_generation :: proc(tile : Tile) {
         world[ci.x][ci.y] = tile
         count_useless += 1
     }
-    
-    fmt.println(count_useless)
+    count_clusters_sizes[count_useless] += 1
+    delete(visited)
+    queue.destroy(&tovisit)
 }
 
 draw_text :: proc(text: string, pos: rl.Vector2, scale: f32) {
@@ -110,6 +114,10 @@ main :: proc() {
     rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "nucoib")
     rl.SetTargetFPS(60)
     
+    world, err = new([WORLD_WIDTH][WORLD_HEIGHT]Tile)    
+    if(world == nil) do fmt.println("Buy MORE RAM! --> ", err, "\n Need memory: ", size_of([WORLD_WIDTH][WORLD_HEIGHT]Tile), "Byte")
+    fmt.println("Map size: ", size_of([WORLD_WIDTH][WORLD_HEIGHT]Tile), "Byte")
+    
     // font : rl.Font = rl.LoadFont("./Riglos.ttf")
     font_texture = rl.LoadTexture("./charmap-oldschool_white.png")
     char_width = font_texture.width / COLS;
@@ -123,6 +131,9 @@ main :: proc() {
     
     for i in 0..<CLUSTER_COUNT {
         cluster_generation(Tile(rand.int31_max(4)))
+    }
+    for v,i in count_clusters_sizes {
+        fmt.println(i, ":", v)
     }
     
     for !rl.WindowShouldClose() {
