@@ -14,10 +14,10 @@ ROWS : i32 : 7
 WINDOW_WIDTH : i32 : 1280
 WINDOW_HEIGHT : i32 : 720
 scale : f32 = 2 
-WORLD_WIDTH : i32 : 230000
-WORLD_HEIGHT : i32 : 230000
+WORLD_WIDTH : i32 : 1000
+WORLD_HEIGHT : i32 : 1000
 CLUSTER_SIZE :: 100
-CLUSTER_COUNT :: 10000
+CLUSTER_COUNT :: 1000
 
 Player :: struct { 
     x : i32,
@@ -42,6 +42,7 @@ count_clusters_sizes : [CLUSTER_SIZE + 1]i32
 
 cluster_generation :: proc(tile : Tile) {
     count_useless = 0
+    count_usefull := 0
     cx := rand.int31_max(WORLD_WIDTH)
     cy := rand.int31_max(WORLD_HEIGHT)
 
@@ -55,7 +56,10 @@ cluster_generation :: proc(tile : Tile) {
         if slice.contains(visited[:], ci) do continue
         append(&visited, ci)
         // y = -x/10+1
-        if rand.float32() >= f32(-count_useless)/CLUSTER_SIZE+1 do continue
+        r := rand.float32()
+        y := f32(-count_useless)/CLUSTER_SIZE+1
+        count_useless += 1
+        if r >= y do continue
 
         // y = -log(x/10)
         // if rand.float32() >= -math.log10(f32(count_useless)/CLUSTER_SIZE) do continue      
@@ -73,9 +77,9 @@ cluster_generation :: proc(tile : Tile) {
             queue.push_back(&tovisit, [2]i32{ci.x, ci.y+1})
         }
         world[ci.x][ci.y] = tile
-        count_useless += 1
+        count_usefull += 1
     }
-    count_clusters_sizes[count_useless] += 1
+    count_clusters_sizes[count_usefull] += 1
     delete(visited)
     queue.destroy(&tovisit)
 }
