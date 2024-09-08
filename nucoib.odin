@@ -38,7 +38,7 @@ char_width : i32
 char_height : i32
 font_texture : rl.Texture2D
 count_useless : i32 = 0
-count_clusters_sizes : [CLUSTER_SIZE]i32 
+count_clusters_sizes : [CLUSTER_SIZE + 1]i32 
 
 cluster_generation :: proc(tile : Tile) {
     count_useless = 0
