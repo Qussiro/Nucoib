@@ -11,6 +11,8 @@ import "base:runtime"
 
 COLS            :: 18
 ROWS            :: 7
+STOOD_MENU_H    :: 5
+STOOD_MENU_W    :: 17
 WORLD_WIDTH     :: 1000
 WORLD_HEIGHT    :: 1000
 CLUSTER_SIZE    :: 100
@@ -53,7 +55,6 @@ Direction :: enum {
    UP, 
 }
 
-
 window_width := i32(1280)
 window_height := i32(720)
 world: ^World
@@ -69,7 +70,8 @@ cols: i32
 pressed_move: f32
 pressed_zoom: f32
 direction := Direction.RIGHT
-
+text_buffer: [512]u8
+stood_menu: bool
 
 cluster_generation :: proc(tile: OreTile) {
     Point :: [2]i32
@@ -191,6 +193,10 @@ input :: proc(dt : f32) {
         direction = Direction((i32(direction) + 1) % (i32(max(Direction)) + 1))
         fmt.println(direction)
     }
+    if rl.IsKeyPressed(rl.KeyboardKey.GRAVE) {
+        stood_menu = !stood_menu
+        fmt.println("Stood_menu:",stood_menu)
+    }
     if rl.IsKeyDown(rl.KeyboardKey.C) {
         switch direction {
             case .RIGHT: buildings[player.x][player.y] = .CONVEYOR_RIGHT
@@ -201,6 +207,39 @@ input :: proc(dt : f32) {
     }
     if rl.IsKeyDown(rl.KeyboardKey.LEFT_SHIFT) && rl.IsKeyDown(rl.KeyboardKey.D){
         buildings[player.x][player.y] = .NONE
+    }
+}
+
+draw_border :: proc(x, y, w, h: i32, fill: bool = false) {
+    for i := i32(0); i < w; i += 1 {
+        x := f32(i * char_width) * scale
+        upper_pos := rl.Vector2 { x, 0 }
+        lower_pos := rl.Vector2 { x, f32((h - 1) * char_height) * scale }
+        if (i == 0 || i == w - 1) {
+            draw_char('+', upper_pos, scale)
+            draw_char('+', lower_pos, scale)
+        } else {
+            draw_char('-', upper_pos, scale)
+            draw_char('-', lower_pos, scale)
+        }
+    }
+    for i := i32(1); i < h - 1; i += 1 {
+        y := f32(i * char_height) * scale
+        left_pos := rl.Vector2 { 0, y }
+        right_pos := rl.Vector2 { f32((w - 1) * char_width) * scale, y }
+        draw_char('|', left_pos, scale)
+        draw_char('|', right_pos, scale)
+    }
+    if fill {
+        for i := i32(1); i < w - 1; i += 1 {
+            for j := i32(1); j < h - 1; j += 1 {
+                char_pos := rl.Vector2 {
+                    f32(i * char_width) * scale,
+                    f32(j * char_height) * scale
+                }
+                draw_char(' ', char_pos, scale)
+            } 
+        }
     }
 }
 
@@ -223,7 +262,7 @@ main :: proc() {
     
     fmt.println("Map size: ", 2*size_of(World), "Bytes")
     
-    font_texture = rl.LoadTexture("./charmap-oldschool_white.png")
+    font_texture = rl.LoadTexture("./charmap-oldschool_white12.png")
     char_width = font_texture.width / COLS;
     char_height = font_texture.height / ROWS;
     
@@ -304,28 +343,23 @@ main :: proc() {
         }
         draw_char('@', player_pos, scale)
 
-        // SETKA net RAMKA
-        for i := i32(0); i < cols; i += 1 {
-            x := f32(i * char_width) * scale
-            upper_pos := rl.Vector2 { x, 0 }
-            lower_pos := rl.Vector2 { x, f32((rows - 1) * char_height) * scale }
-            if (i == 0 || i == cols - 1) {
-                draw_char('+', upper_pos, scale)
-                draw_char('+', lower_pos, scale)
-            } else {
-                draw_char('-', upper_pos, scale)
-                draw_char('-', lower_pos, scale)
-            }
-        }
-        for i := i32(1); i < rows - 1; i += 1 {
-            y := f32(i * char_height) * scale
-            left_pos := rl.Vector2 { 0, y }
-            right_pos := rl.Vector2 { f32((cols - 1) * char_width) * scale, y }
-            draw_char('|', left_pos, scale)
-            draw_char('|', right_pos, scale)
+        // RAMKA he is right
+        draw_border(0, 0, cols, rows)
+        
+        if rows > STOOD_MENU_H && cols > STOOD_MENU_W && stood_menu {
+            draw_border(0, 0, STOOD_MENU_W, STOOD_MENU_H, true)
+        
+            draw_text("STOOD ON:", {f32(char_width), f32(char_height)} * scale, scale)
+            // Ore text
+            text := fmt.bprintf(text_buffer[:], "%v", world[player.x][player.y])
+            draw_text(text, {f32(char_width), f32(char_height)*2} * scale, scale)
+        
+            // Building text
+            text = fmt.bprintf(text_buffer[:], "%v", buildings[player.x][player.y])
+            draw_text(text, {f32(char_width), f32(char_height)*3} * scale, scale)
         }
         
-        rl.DrawFPS(14, 14)
+        // rl.DrawFPS(14, 14)
         rl.EndDrawing()
     }    
 }
