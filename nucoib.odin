@@ -16,27 +16,47 @@ WINDOW_HEIGHT   :: 720
 WORLD_WIDTH     :: 1000
 WORLD_HEIGHT    :: 1000
 CLUSTER_SIZE    :: 100
-CLUSTER_COUNT   :: 100000
+CLUSTER_COUNT   :: 10000
 MIN_SCALE       :: f32(1)
 MAX_SCALE       :: f32(20)
-BUTTON_COOLDOWN :: f32(0.05)
+ZOOM_COOLDOWN   :: f32(0.15)
+MOVE_COOLDOWN   :: f32(0.05)
 
 
-World :: [WORLD_WIDTH][WORLD_HEIGHT]Tile
+World :: [WORLD_WIDTH][WORLD_HEIGHT]OreTile
+Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]BuildingTile
+
 
 Player :: struct { 
     x : i32,
     y : i32,
 }
 
-Tile :: enum (u8) {
+BuildingTile :: enum(u8){
+    NONE,
+    DRILL,
+    CONVEYOR_RIGHT,
+    CONVEYOR_LEFT,
+    CONVEYOR_UP,
+    CONVEYOR_DOWN,
+}
+
+OreTile :: enum (u8) {
     NONE,
     IRON,
     TUNGSTEN,
     COAL,
 }
 
+Direction :: enum {
+   RIGHT,
+   DOWN,
+   LEFT,
+   UP, 
+}
+
 world: ^World
+buildings: ^Buildings
 player: Player
 char_width: i32
 char_height: i32
@@ -45,9 +65,11 @@ count_clusters_sizes: [CLUSTER_SIZE + 1]i32
 scale := f32(2)
 rows : i32
 cols : i32
-pressed_time : f32
+pressed_move : f32
+pressed_zoom : f32
+direction : Direction = .RIGHT
 
-cluster_generation :: proc(tile: Tile) {
+cluster_generation :: proc(tile: OreTile) {
     Point :: [2]i32
     
     count_useless := 0
@@ -74,16 +96,16 @@ cluster_generation :: proc(tile: Tile) {
         // y = -log(x/10)
         // if rand.float32() >= -math.log10(f32(count_useless)/CLUSTER_SIZE) do continue      
         
-        if(ci.x - 1 != -1) {
+        if ci.x - 1 != -1 {
             queue.push_back(&tovisit, Point{ci.x-1, ci.y})
         }
-        if(ci.x + 1 != WORLD_WIDTH) {
+        if ci.x + 1 != WORLD_WIDTH {
             queue.push_back(&tovisit, Point{ci.x+1, ci.y})
         }
-        if(ci.y - 1 != -1) {
+        if ci.y - 1 != -1 {
             queue.push_back(&tovisit, Point{ci.x, ci.y-1})
         }
-        if(ci.y + 1 != WORLD_HEIGHT) {
+        if ci.y + 1 != WORLD_HEIGHT {
             queue.push_back(&tovisit, Point{ci.x, ci.y+1})
         }
         world[ci.x][ci.y] = tile
@@ -105,20 +127,22 @@ draw_text :: proc(text: string, pos: rl.Vector2, scale: f32) {
     }
 }
 
-draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32) {
+draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, rotation: f32 = 0) {
     source := rl.Rectangle {
         x = f32(i32(c - 32) % COLS * char_width),
         y = f32(i32(c - 32) / COLS * char_height),
         width = f32(char_width),
         height = f32(char_height),
     }
-    dest : rl.Rectangle = {
-        x = pos.x,
-        y = pos.y,
+    dest := rl.Rectangle {
+        x = pos.x + f32(char_width)/2 * scale,
+        y = pos.y + f32(char_height)/2 * scale,
         width = f32(char_width) * scale,
         height = f32(char_height) * scale,
     }
-    rl.DrawTexturePro(font_texture, source, dest, {}, 0, rl.WHITE) 
+    origin := rl.Vector2 {f32(char_width), f32(char_height)}/2 * scale
+    
+    rl.DrawTexturePro(font_texture, source, dest, origin, rotation, rl.WHITE) 
 }
 
 grid_size :: proc() -> (i32, i32) {
@@ -127,26 +151,54 @@ grid_size :: proc() -> (i32, i32) {
     return rows, cols
 }
 
-input :: proc() {
-    if rl.IsKeyDown(rl.KeyboardKey.UP) && player.y > 0 {
-        player.y -= 1
+input :: proc(dt : f32) {
+    if pressed_move > 0 do pressed_move -= dt
+    else {
+        if rl.IsKeyDown(rl.KeyboardKey.UP) && player.y > 0 {
+            player.y -= 1
+        }
+        if rl.IsKeyDown(rl.KeyboardKey.RIGHT) && player.x < WORLD_WIDTH - 1 {
+            player.x += 1
+        }
+        if rl.IsKeyDown(rl.KeyboardKey.LEFT) && player.x > 0 {
+            player.x -= 1 
+        }
+        if rl.IsKeyDown(rl.KeyboardKey.DOWN) && player.y < WORLD_HEIGHT - 1 {
+            player.y += 1
+        }  
+        pressed_move = MOVE_COOLDOWN      
     }
-    if rl.IsKeyDown(rl.KeyboardKey.RIGHT) && player.x < WORLD_WIDTH - 1 {
-        player.x += 1
+    
+    if pressed_zoom > 0 do pressed_zoom -= dt
+    else {
+        if rl.IsKeyDown(rl.KeyboardKey.MINUS) {
+            scale = max(MIN_SCALE, scale*0.9)
+            rows, cols = grid_size()
+        }
+        if rl.IsKeyDown(rl.KeyboardKey.EQUAL) {
+            scale = min(scale*1.1, MAX_SCALE)
+            rows, cols = grid_size()
+        }
+        pressed_zoom = ZOOM_COOLDOWN
     }
-    if rl.IsKeyDown(rl.KeyboardKey.LEFT) && player.x > 0 {
-        player.x -= 1 
+    
+    if rl.IsKeyDown(rl.KeyboardKey.D) {
+        buildings[player.x][player.y] = .DRILL
     }
-    if rl.IsKeyDown(rl.KeyboardKey.DOWN) && player.y < WORLD_HEIGHT - 1 {
-        player.y += 1
+    if rl.IsKeyPressed(rl.KeyboardKey.R) {
+        direction = Direction((i32(direction) + 1) % (i32(max(Direction)) + 1))
+        fmt.println(direction)
     }
-    if rl.IsKeyDown(rl.KeyboardKey.MINUS) {
-        scale = max(MIN_SCALE, scale*0.9)
-        rows, cols = grid_size()
+    if rl.IsKeyDown(rl.KeyboardKey.C) {
+        switch direction {
+            case .RIGHT: buildings[player.x][player.y] = .CONVEYOR_RIGHT
+            case .DOWN: buildings[player.x][player.y] = .CONVEYOR_DOWN
+            case .LEFT: buildings[player.x][player.y] = .CONVEYOR_LEFT
+            case .UP: buildings[player.x][player.y] = .CONVEYOR_UP
+        }
     }
-    if rl.IsKeyDown(rl.KeyboardKey.EQUAL) {
-        scale = min(scale*1.1, MAX_SCALE)
-        rows, cols = grid_size()
+    if rl.IsKeyDown(rl.KeyboardKey.LEFT_SHIFT) && rl.IsKeyDown(rl.KeyboardKey.D){
+        buildings[player.x][player.y] = .NONE
     }
 }
 
@@ -156,11 +208,17 @@ main :: proc() {
     
     err: runtime.Allocator_Error
     world, err = new(World)
-    if(err != nil) {
+    if err != nil {
         fmt.println("Buy MORE RAM! --> ", err)
         fmt.println("Need memory: ", size_of(World), "Bytes")
     }
-    fmt.println("Map size: ", size_of(World), "Bytes")
+    buildings, err = new(Buildings)
+    if err != nil {
+        fmt.println("Buy MORE RAM! --> ", err)
+        fmt.println("Need memory: ", size_of(Buildings), "Bytes")
+    }
+    
+    fmt.println("Map size: ", 2*size_of(World), "Bytes")
     
     font_texture = rl.LoadTexture("./charmap-oldschool_white.png")
     char_width = font_texture.width / COLS;
@@ -172,8 +230,8 @@ main :: proc() {
     player.y = WORLD_HEIGHT / 2
     
     for i in 0..<CLUSTER_COUNT {
-        max_tile := i32(max(Tile)) + 1
-        tile := Tile(rand.int31_max(max_tile))
+        max_tile := i32(max(OreTile)) + 1
+        tile := OreTile(rand.int31_max(max_tile))
         cluster_generation(tile)
     }
     for v,i in count_clusters_sizes {
@@ -185,11 +243,7 @@ main :: proc() {
         rl.ClearBackground(rl.GetColor(0x202020FF))
         dt := rl.GetFrameTime()
         
-        if pressed_time > 0 do pressed_time -= dt
-        else {
-            input()
-            pressed_time = BUTTON_COOLDOWN
-        }
+        input(dt)
 
         first_col := max(0, player.x - cols/2)
         last_col  := min(player.x + cols/2, WORLD_WIDTH)
@@ -198,19 +252,37 @@ main :: proc() {
         
         for i := first_col; i < last_col; i += 1 {
             for j := first_row; j < last_row; j += 1 {
-                ch: u8
+                ch_ore: u8
+                ch_building: u8
                 #partial switch world[i][j] {
-                    case .NONE:     ch = ' '
-                    case .IRON:     ch = 'I'
-                    case .TUNGSTEN: ch = 'T'
-                    case .COAL:     ch = 'C'
+                    case .NONE:     ch_ore = ' '
+                    case .IRON:     ch_ore = 'I'
+                    case .TUNGSTEN: ch_ore = 'T'
+                    case .COAL:     ch_ore = 'C'
                     case: unimplemented("BRUH!")
                 }
+                #partial switch buildings[i][j] {
+                    case .NONE:     ch_building = ' '
+                    case .DRILL:    ch_building = 'D'
+                    case .CONVEYOR_RIGHT..=.CONVEYOR_DOWN:  ch_building = '>'
+                    case: unimplemented("BRUH!")
+                }
+                
                 pos := rl.Vector2 {
                     f32((i - player.x + cols/2) * char_width) * scale,
                     f32((j - player.y + rows/2) * char_height) * scale
                 }
-                draw_char(ch, pos, scale)
+
+                draw_char(ch_ore, pos, scale)
+                
+                #partial switch buildings[i][j] {
+                    case .CONVEYOR_RIGHT:  draw_char(ch_building, pos, scale, 0)
+                    case .CONVEYOR_LEFT:  draw_char(ch_building, pos, scale, 180)
+                    case .CONVEYOR_UP:  draw_char(ch_building, pos, scale, 270)
+                    case .CONVEYOR_DOWN:  draw_char(ch_building, pos, scale, 90)
+                    case .NONE: 
+                    case: draw_char(ch_building, pos, scale, 0)
+                }
             }
         }
 
