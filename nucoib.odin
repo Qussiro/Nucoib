@@ -11,8 +11,6 @@ import "base:runtime"
 
 COLS            :: 18
 ROWS            :: 7
-WINDOW_WIDTH    :: 1280
-WINDOW_HEIGHT   :: 720
 WORLD_WIDTH     :: 1000
 WORLD_HEIGHT    :: 1000
 CLUSTER_SIZE    :: 100
@@ -55,6 +53,9 @@ Direction :: enum {
    UP, 
 }
 
+
+window_width := i32(1280)
+window_height := i32(720)
 world: ^World
 buildings: ^Buildings
 player: Player
@@ -63,11 +64,12 @@ char_height: i32
 font_texture: rl.Texture2D
 count_clusters_sizes: [CLUSTER_SIZE + 1]i32
 scale := f32(2)
-rows : i32
-cols : i32
-pressed_move : f32
-pressed_zoom : f32
-direction : Direction = .RIGHT
+rows: i32
+cols: i32
+pressed_move: f32
+pressed_zoom: f32
+direction := Direction.RIGHT
+
 
 cluster_generation :: proc(tile: OreTile) {
     Point :: [2]i32
@@ -146,8 +148,8 @@ draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, rotation: f32 = 0) {
 }
 
 grid_size :: proc() -> (i32, i32) {
-    rows := i32(f32(WINDOW_HEIGHT) / (f32(char_height) * scale))
-    cols := i32(f32(WINDOW_WIDTH) / (f32(char_width) * scale))
+    rows := i32(f32(window_height) / (f32(char_height) * scale))
+    cols := i32(f32(window_width) / (f32(char_width) * scale))
     return rows, cols
 }
 
@@ -203,7 +205,8 @@ input :: proc(dt : f32) {
 }
 
 main :: proc() {
-    rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "nucoib")
+    rl.InitWindow(window_width, window_height, "nucoib")
+    rl.SetWindowState({.WINDOW_RESIZABLE})
     rl.SetTargetFPS(60)
     
     err: runtime.Allocator_Error
@@ -240,6 +243,14 @@ main :: proc() {
     
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
+        
+        if rl.IsWindowResized() {
+            window_width = rl.GetScreenWidth()
+            window_height = rl.GetScreenHeight()
+
+            rows, cols = grid_size()
+        }
+        
         rl.ClearBackground(rl.GetColor(0x202020FF))
         dt := rl.GetFrameTime()
         
