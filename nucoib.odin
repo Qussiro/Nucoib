@@ -9,16 +9,18 @@ import "core:container/queue"
 import "core:slice"
 import "base:runtime"
 
-COLS          :: 18
-ROWS          :: 7
-WINDOW_WIDTH  :: 1280
-WINDOW_HEIGHT :: 720
-WORLD_WIDTH   :: 1000
-WORLD_HEIGHT  :: 1000
-CLUSTER_SIZE  :: 100
-CLUSTER_COUNT :: 1000
-MIN_SCALE     :: f32(1)
-MAX_SCALE     :: f32(20)
+COLS            :: 18
+ROWS            :: 7
+WINDOW_WIDTH    :: 1280
+WINDOW_HEIGHT   :: 720
+WORLD_WIDTH     :: 1000
+WORLD_HEIGHT    :: 1000
+CLUSTER_SIZE    :: 100
+CLUSTER_COUNT   :: 100000
+MIN_SCALE       :: f32(1)
+MAX_SCALE       :: f32(20)
+BUTTON_COOLDOWN :: f32(0.05)
+
 
 World :: [WORLD_WIDTH][WORLD_HEIGHT]Tile
 
@@ -41,6 +43,9 @@ char_height: i32
 font_texture: rl.Texture2D
 count_clusters_sizes: [CLUSTER_SIZE + 1]i32
 scale := f32(2)
+rows : i32
+cols : i32
+pressed_time : f32
 
 cluster_generation :: proc(tile: Tile) {
     Point :: [2]i32
@@ -122,6 +127,29 @@ grid_size :: proc() -> (i32, i32) {
     return rows, cols
 }
 
+input :: proc() {
+    if rl.IsKeyDown(rl.KeyboardKey.UP) && player.y > 0 {
+        player.y -= 1
+    }
+    if rl.IsKeyDown(rl.KeyboardKey.RIGHT) && player.x < WORLD_WIDTH - 1 {
+        player.x += 1
+    }
+    if rl.IsKeyDown(rl.KeyboardKey.LEFT) && player.x > 0 {
+        player.x -= 1 
+    }
+    if rl.IsKeyDown(rl.KeyboardKey.DOWN) && player.y < WORLD_HEIGHT - 1 {
+        player.y += 1
+    }
+    if rl.IsKeyDown(rl.KeyboardKey.MINUS) {
+        scale = max(MIN_SCALE, scale*0.9)
+        rows, cols = grid_size()
+    }
+    if rl.IsKeyDown(rl.KeyboardKey.EQUAL) {
+        scale = min(scale*1.1, MAX_SCALE)
+        rows, cols = grid_size()
+    }
+}
+
 main :: proc() {
     rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "nucoib")
     rl.SetTargetFPS(60)
@@ -138,7 +166,7 @@ main :: proc() {
     char_width = font_texture.width / COLS;
     char_height = font_texture.height / ROWS;
     
-    rows, cols := grid_size()
+    rows, cols = grid_size()
 
     player.x = WORLD_WIDTH / 2
     player.y = WORLD_HEIGHT / 2
@@ -155,26 +183,12 @@ main :: proc() {
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
         rl.ClearBackground(rl.GetColor(0x202020FF))
+        dt := rl.GetFrameTime()
         
-        if rl.IsKeyDown(rl.KeyboardKey.UP) && player.y > 0 {
-            player.y -= 1
-        }
-        if rl.IsKeyDown(rl.KeyboardKey.RIGHT) && player.x < WORLD_WIDTH - 1 {
-            player.x += 1
-        }
-        if rl.IsKeyDown(rl.KeyboardKey.LEFT) && player.x > 0 {
-            player.x -= 1 
-        }
-        if rl.IsKeyDown(rl.KeyboardKey.DOWN) && player.y < WORLD_HEIGHT - 1 {
-            player.y += 1
-        }
-        if rl.IsKeyDown(rl.KeyboardKey.MINUS) {
-            scale = max(MIN_SCALE, scale*0.9)
-            rows, cols = grid_size()
-        }
-        if rl.IsKeyDown(rl.KeyboardKey.EQUAL) {
-            scale = min(scale*1.1, MAX_SCALE)
-            rows, cols = grid_size()
+        if pressed_time > 0 do pressed_time -= dt
+        else {
+            input()
+            pressed_time = BUTTON_COOLDOWN
         }
 
         first_col := max(0, player.x - cols/2)
