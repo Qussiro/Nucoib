@@ -9,20 +9,21 @@ import "core:container/queue"
 import "core:slice"
 import "base:runtime"
 
-COLS            :: 18
-ROWS            :: 7
-STOOD_MENU_H    :: 5
-STOOD_MENU_W    :: 17
-WORLD_WIDTH     :: 1000
-WORLD_HEIGHT    :: 1000
-CLUSTER_SIZE    :: 100
-CLUSTER_COUNT   :: 10000
-MIN_SCALE       :: f32(1)
-MAX_SCALE       :: f32(20)
-ZOOM_COOLDOWN   :: f32(0.0)
-MOVE_COOLDOWN   :: f32(0.05)
-DRILLING_TIME      :: f32(2) 
-
+COLS                 :: 18
+ROWS                 :: 7
+STOOD_MENU_H         :: 5
+STOOD_MENU_W         :: 17
+WORLD_WIDTH          :: 1000
+WORLD_HEIGHT         :: 1000
+CLUSTER_SIZE         :: 100
+CLUSTER_COUNT        :: 10000
+MIN_SCALE            :: f32(1)
+MAX_SCALE            :: f32(20)
+ORE_SCALE            :: f32(0.5)
+ZOOM_COOLDOWN        :: f32(0.0)
+MOVE_COOLDOWN        :: f32(0.05)
+DRILLING_TIME        :: f32(2) 
+TRANSPORTATION_SPEED :: f32(1)
 
 World :: [WORLD_WIDTH][WORLD_HEIGHT]OreTile
 Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]BuildingTile
@@ -41,7 +42,10 @@ Drill :: struct {
 }
 
 Conveyor :: struct {
-    direction: Direction
+    ore_type: OreTile,
+    capacity: i32,
+    transportation_progress: f32,
+    direction: Direction,
 }
 
 BuildingTile :: union {
@@ -206,7 +210,7 @@ input :: proc(dt : f32) {
         fmt.println("Stood_menu:",stood_menu)
     }
     if rl.IsKeyDown(rl.KeyboardKey.C) {
-        buildings[player.x][player.y] = Conveyor{direction}
+        buildings[player.x][player.y] = Conveyor{direction = direction}
     }
     if rl.IsKeyDown(rl.KeyboardKey.LEFT_SHIFT) && rl.IsKeyDown(rl.KeyboardKey.D){
         buildings[player.x][player.y] = BuildingTile{}
@@ -311,7 +315,80 @@ main :: proc() {
                             building.drilling_timer = 0
                         }
                         building.drilling_timer += dt
+                        
+                        conveyor, is_conveyor := &buildings[i+1][j].(Conveyor)
+                        if is_conveyor && conveyor.ore_type == .NONE && building.ore_count > 0 {
+                            building.ore_count -= 1
+                            conveyor.ore_type = building.ore_type
+                        }
                     case Conveyor:
+                        if building.ore_type == .NONE do continue
+                        
+                        building.transportation_progress += dt * TRANSPORTATION_SPEED
+                        
+                        switch building.direction {
+                        case .RIGHT: 
+                            if i+1 != WORLD_WIDTH { 
+                                conveyor, is_conveyor := &buildings[i+1][j].(Conveyor)
+                                if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .LEFT {
+                                    if building.transportation_progress >= 1 {
+                                        conveyor.ore_type = building.ore_type
+                                        building.ore_type = .NONE
+                                        building.transportation_progress = 0
+                                    
+                                        if conveyor.direction == .UP || conveyor.direction == .DOWN {
+                                            conveyor.transportation_progress = 0.7
+                                        }
+                                    }
+                                }
+                            }
+                        case .DOWN:
+                            if j+1 != WORLD_HEIGHT { 
+                                conveyor, is_conveyor := &buildings[i][j+1].(Conveyor)
+                                if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .UP {
+                                    if building.transportation_progress >= 1 {
+                                        conveyor.ore_type = building.ore_type
+                                        building.ore_type = .NONE
+                                        building.transportation_progress = 0
+                                        
+                                        if conveyor.direction == .LEFT || conveyor.direction == .RIGHT {
+                                            conveyor.transportation_progress = 0.7
+                                        }
+                                    }                                            
+                                }
+                            }
+                        case .LEFT: 
+                            if i-1 >= 0 { 
+                                conveyor, is_conveyor := &buildings[i-1][j].(Conveyor)
+                                if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .RIGHT {
+                                    if building.transportation_progress >= 1 {
+                                        conveyor.ore_type = building.ore_type
+                                        building.ore_type = .NONE
+                                        building.transportation_progress = 0
+                                        
+                                        if conveyor.direction == .UP || conveyor.direction == .DOWN {
+                                            conveyor.transportation_progress = 0.7
+                                        }
+                                    }
+                                }
+                            }
+                        case .UP: 
+                            if j-1 >= 0 { 
+                                conveyor, is_conveyor := &buildings[i][j-1].(Conveyor)
+                                if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .DOWN {
+                                    if building.transportation_progress >= 1 {
+                                        conveyor.ore_type = building.ore_type
+                                        building.ore_type = .NONE
+                                        building.transportation_progress = 0
+                                        
+                                        if conveyor.direction == .LEFT || conveyor.direction == .RIGHT {
+                                            conveyor.transportation_progress = 0.7
+                                        } 
+                                    }
+                                }
+                            }
+                        }
+                        building.transportation_progress = min(building.transportation_progress, 1)
                     case nil:
                 }
             }
@@ -348,7 +425,7 @@ main :: proc() {
                 
                 switch building in buildings[i][j] {
                     case Conveyor:
-                        switch building.direction{
+                        switch building.direction {
                             case .RIGHT: draw_char(ch_building, pos, scale, 0)
                             case .DOWN: draw_char(ch_building, pos, scale, 90)
                             case .LEFT: draw_char(ch_building, pos, scale, 180)
@@ -359,7 +436,56 @@ main :: proc() {
                 }
             }
         }
+        
+        for i := first_col; i < last_col; i += 1 {
+            for j := first_row; j < last_row; j += 1 {
+                conveyor, is_conveyor := &buildings[i][j].(Conveyor)
+                if is_conveyor && conveyor.ore_type != .NONE {
+                    pos := rl.Vector2 {
+                        f32((i - player.x + cols/2) * char_width) * scale,
+                        f32((j - player.y + rows/2) * char_height) * scale
+                    }
+                    
+                    ore_offset: rl.Vector2
+                    
+                    switch conveyor.direction {
+                        case .RIGHT: 
+                            // MAGIC STUFF, DON`T TOUCH
+                            ore_offset =  {
+                                f32(char_width)*scale*(conveyor.transportation_progress-ORE_SCALE), 
+                                f32(char_height)*scale*(1./2-1./2*ORE_SCALE)
+                            }
+                        case .DOWN:
+                            ore_offset =  {
+                                f32(char_width)*scale*(1./2-1./2*ORE_SCALE),
+                                f32(char_height)*scale*(conveyor.transportation_progress-ORE_SCALE)
+                            } 
+                        case .LEFT: 
+                            ore_offset = rl.Vector2 {
+                                f32(char_width)*scale*(1-conveyor.transportation_progress), 
+                                f32(char_height)*scale*(1./2-1./2*ORE_SCALE)
+                            }
+                        case .UP:
+                            ore_offset =  {
+                                f32(char_width)*scale*(1./2-1./2*ORE_SCALE),
+                                f32(char_height)*scale*(1-conveyor.transportation_progress) 
+                            } 
+                    }
 
+                    ore_offset += pos
+                    c: u8
+                    #partial switch conveyor.ore_type {
+                        case .IRON:     c = 'I'
+                        case .TUNGSTEN: c = 'T'
+                        case .COAL:     c = 'C'
+                        case: unimplemented("BRUH!")
+                    }
+    
+                    draw_char(c, ore_offset,scale*ORE_SCALE)
+                }
+    
+            }
+        }
         // PLAYER
         player_pos := rl.Vector2 {
             f32(cols/2 * char_width) * scale,
@@ -379,7 +505,7 @@ main :: proc() {
             // Building text
             switch building in buildings[player.x][player.y] {
                 case Drill: text_building = fmt.bprintf(text_buffer[len(text_ore):], "DRILL[%v:%v]", building.ore_type, building.ore_count)
-                case Conveyor: text_building = fmt.bprintf(text_buffer[len(text_ore):], "CONVEYOR_%v", building.direction)
+                case Conveyor: text_building = fmt.bprintf(text_buffer[len(text_ore):], "CONVEYOR_%v[%v]", building.direction, building.ore_type)
                 case nil: text_building = fmt.bprintf(text_buffer[len(text_ore):], "NONE")
                 case: fmt.println(building)
             }
