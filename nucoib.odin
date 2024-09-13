@@ -24,6 +24,26 @@ ZOOM_COOLDOWN        :: f32(0.0)
 MOVE_COOLDOWN        :: f32(0.05)
 DRILLING_TIME        :: f32(2) 
 TRANSPORTATION_SPEED :: f32(1)
+BG_COLOR             :: rl.Color {0x20, 0x20, 0x20, 0xFF}
+
+OFFSETS :: [Direction][2]i32 {
+    .RIGHT = {1, 0},
+    .DOWN  = {0, 1},
+    .LEFT  = {-1, 0},
+    .UP    = {0, -1},
+}
+PERPENDICULARS :: [Direction][2]Direction {
+    .RIGHT = {.UP, .DOWN},
+    .DOWN = {.LEFT, .RIGHT},
+    .LEFT = {.UP, .DOWN},
+    .UP = {.LEFT, .RIGHT},
+}
+OPPOSITE :: [Direction]Direction {
+    .RIGHT = .LEFT,
+    .LEFT  = .RIGHT,
+    .DOWN  = .UP,
+    .UP    = .DOWN,
+}
 
 World :: [WORLD_WIDTH][WORLD_HEIGHT]OreTile
 Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]BuildingTile
@@ -143,7 +163,7 @@ draw_text :: proc(text: string, pos: rl.Vector2, scale: f32) {
     }
 }
 
-draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, rotation: f32 = 0) {
+draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, rotation: f32 = 0) {
     source := rl.Rectangle {
         x = f32(i32(c - 32) % COLS * char_width),
         y = f32(i32(c - 32) / COLS * char_height),
@@ -157,8 +177,9 @@ draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, rotation: f32 = 0) {
         height = f32(char_height) * scale,
     }
     origin := rl.Vector2 {f32(char_width), f32(char_height)}/2 * scale
-    
-    rl.DrawTexturePro(font_texture, source, dest, origin, rotation, rl.WHITE) 
+
+    rl.DrawRectanglePro(dest, origin, rotation, bg_color)
+    rl.DrawTexturePro(font_texture, source, dest, origin, rotation, fg_color) 
 }
 
 grid_size :: proc() -> (i32, i32) {
@@ -217,25 +238,25 @@ input :: proc(dt : f32) {
     }
 }
 
-draw_border :: proc(x, y, w, h: i32, fill: bool = false) {
+draw_border :: proc(x, y, w, h: i32, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, fill: bool = false) {
     for i := i32(0); i < w; i += 1 {
         x := f32(i * char_width) * scale
         upper_pos := rl.Vector2 { x, 0 }
         lower_pos := rl.Vector2 { x, f32((h - 1) * char_height) * scale }
         if (i == 0 || i == w - 1) {
-            draw_char('+', upper_pos, scale)
-            draw_char('+', lower_pos, scale)
+            draw_char('+', upper_pos, scale, bg_color, fg_color)
+            draw_char('+', lower_pos, scale, bg_color, fg_color)
         } else {
-            draw_char('-', upper_pos, scale)
-            draw_char('-', lower_pos, scale)
+            draw_char('-', upper_pos, scale, bg_color, fg_color)
+            draw_char('-', lower_pos, scale, bg_color, fg_color)
         }
     }
     for i := i32(1); i < h - 1; i += 1 {
         y := f32(i * char_height) * scale
         left_pos := rl.Vector2 { 0, y }
         right_pos := rl.Vector2 { f32((w - 1) * char_width) * scale, y }
-        draw_char('|', left_pos, scale)
-        draw_char('|', right_pos, scale)
+        draw_char('|', left_pos, scale, bg_color, fg_color)
+        draw_char('|', right_pos, scale, bg_color, fg_color)
     }
     if fill {
         for i := i32(1); i < w - 1; i += 1 {
@@ -244,11 +265,16 @@ draw_border :: proc(x, y, w, h: i32, fill: bool = false) {
                     f32(i * char_width) * scale,
                     f32(j * char_height) * scale
                 }
-                draw_char(' ', char_pos, scale)
+                draw_char(' ', char_pos, scale, bg_color, fg_color)
             } 
         }
     }
 }
+
+check_boundaries :: proc(pos: [2]i32) -> bool {
+    return pos.x >= 0 && pos.x < WORLD_WIDTH && pos.y >= 0 && pos.y < WORLD_HEIGHT  
+}
+
 
 main :: proc() {
     rl.InitWindow(window_width, window_height, "nucoib")
@@ -269,8 +295,8 @@ main :: proc() {
     
     fmt.println("Map size: ", 2*size_of(World), "Bytes")
     
-    font_texture = rl.LoadTexture("./charmap-oldschool_white12.png")
-    // font_texture = rl.LoadTexture("./output.png")
+    // font_texture = rl.LoadTexture("./charmap-oldschool_white12.png")
+    font_texture = rl.LoadTexture("./output.png")
     char_width = font_texture.width / COLS;
     char_height = font_texture.height / ROWS;
     
@@ -298,13 +324,13 @@ main :: proc() {
             rows, cols = grid_size()
         }
         
-        rl.ClearBackground(rl.GetColor(0x202020FF))
+        rl.ClearBackground(BG_COLOR)
         dt := rl.GetFrameTime()
         
         input(dt)
 
-        for i := 0; i < WORLD_WIDTH; i += 1 {
-            for j := 0; j < WORLD_HEIGHT; j += 1 {
+        for i: i32 = 0; i < WORLD_WIDTH; i += 1 {
+            for j: i32 = 0; j < WORLD_HEIGHT; j += 1 {
                 switch &building in buildings[i][j]{
                     case Drill: 
                         if world[i][j] == .NONE do continue
@@ -316,98 +342,49 @@ main :: proc() {
                             building.drilling_timer = 0
                         }
                         building.drilling_timer += dt
+
+                        offsets := OFFSETS
+                        opposite := OPPOSITE
+                        perpendiculars := PERPENDICULARS
+                        for direction in Direction{
+                            next_pos := [2]i32{i, j} + offsets[direction]
                         
-                        conveyor, is_conveyor := &buildings[i+1][j].(Conveyor)
-                        if is_conveyor && conveyor.ore_type == .NONE && building.ore_count > 0 {
-                            building.ore_count -= 1
-                            conveyor.ore_type = building.ore_type
+                            if check_boundaries(next_pos) {
+                                conveyor, is_conveyor := &buildings[next_pos.x][next_pos.y].(Conveyor)
+                                if is_conveyor && conveyor.ore_type == .NONE && building.ore_count > 0 {
+                                    if slice.contains(perpendiculars[direction][:], conveyor.direction) do conveyor.transportation_progress = 0.7
+                                    building.ore_count -= 1
+                                    conveyor.ore_type = building.ore_type
+                                }
+                            }
                         }
                     case Conveyor:
                         if building.ore_type == .NONE do continue
                         
                         building.transportation_progress += dt * TRANSPORTATION_SPEED
-
-                        switch building.direction {
-                        case .RIGHT: 
-                            max_progress: f32 = 1
-                            if i+1 != WORLD_WIDTH { 
-                                conveyor, is_conveyor := &buildings[i+1][j].(Conveyor)
-                                if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .LEFT {
-                                    if conveyor.direction == .UP || conveyor.direction == .DOWN {
-                                        max_progress = 1.7
-                                    }
-                                    if building.transportation_progress >= max_progress {
-                                        conveyor.ore_type = building.ore_type
-                                        building.ore_type = .NONE
-                                        building.transportation_progress = 0
-                                    
-                                        if conveyor.direction == .UP || conveyor.direction == .DOWN {
-                                            conveyor.transportation_progress = 0.7
-                                        }
-                                    }
+                        offsets := OFFSETS
+                        opposite := OPPOSITE
+                        perpendiculars := PERPENDICULARS
+                        next_pos := [2]i32{i, j} + offsets[building.direction]
+                        max_progress: f32 = 1
+                        
+                        if check_boundaries(next_pos) { 
+                            conveyor, is_conveyor := &buildings[next_pos.x][next_pos.y].(Conveyor)
+                            if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != opposite[building.direction] {
+                                match_perpendicular := slice.contains(perpendiculars[building.direction][:], conveyor.direction) 
+                                
+                                if match_perpendicular do max_progress = 1.7
+                                
+                                if building.transportation_progress >= max_progress {
+                                    conveyor.ore_type = building.ore_type
+                                    building.ore_type = .NONE
+                                    building.transportation_progress = 0
+                                
+                                    if match_perpendicular do conveyor.transportation_progress = 0.7
                                 }
                             }
-                            building.transportation_progress = min(building.transportation_progress, max_progress)
-                        case .DOWN:
-                            max_progress: f32 = 1
-                            if j+1 != WORLD_HEIGHT { 
-                                conveyor, is_conveyor := &buildings[i][j+1].(Conveyor)
-                                if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .UP {
-                                    if conveyor.direction == .LEFT || conveyor.direction == .RIGHT {
-                                        max_progress = 1.7 
-                                    }
-                                    if building.transportation_progress >= max_progress {
-                                        conveyor.ore_type = building.ore_type
-                                        building.ore_type = .NONE
-                                        building.transportation_progress = 0
-                                        if conveyor.direction == .LEFT || conveyor.direction == .RIGHT {
-                                            conveyor.transportation_progress = 0.7
-                                        }
-                                    }                                            
-                                }
-                            }
-                            building.transportation_progress = min(building.transportation_progress, max_progress)
-                        case .LEFT: 
-                            max_progress: f32 = 1
-                            if i-1 >= 0 { 
-                                conveyor, is_conveyor := &buildings[i-1][j].(Conveyor)
-                                if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .RIGHT {
-                                    if conveyor.direction == .UP || conveyor.direction == .DOWN {
-                                        max_progress = 1.7
-                                    }
-                                    if building.transportation_progress >= max_progress {
-                                        conveyor.ore_type = building.ore_type
-                                        building.ore_type = .NONE
-                                        building.transportation_progress = 0
-                                        
-                                        if conveyor.direction == .UP || conveyor.direction == .DOWN {
-                                            conveyor.transportation_progress = 0.7
-                                        }
-                                    }
-                                }
-                            }
-                            building.transportation_progress = min(building.transportation_progress, max_progress)
-                        case .UP: 
-                            max_progress: f32 = 1
-                            if j-1 >= 0 { 
-                                conveyor, is_conveyor := &buildings[i][j-1].(Conveyor)
-                                if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .DOWN {
-                                    if conveyor.direction == .LEFT || conveyor.direction == .RIGHT {
-                                        max_progress = 1.7
-                                    } 
-                                    if building.transportation_progress >= max_progress {
-                                        conveyor.ore_type = building.ore_type
-                                        building.ore_type = .NONE
-                                        building.transportation_progress = 0
-                                        
-                                        if conveyor.direction == .LEFT || conveyor.direction == .RIGHT {
-                                            conveyor.transportation_progress = 0.7
-                                        } 
-                                    }
-                                }
-                            }
-                            building.transportation_progress = min(building.transportation_progress, max_progress)
                         }
+                        building.transportation_progress = min(building.transportation_progress, max_progress)
                     case nil:
                 }
             }
@@ -445,13 +422,13 @@ main :: proc() {
                 switch building in buildings[i][j] {
                     case Conveyor:
                         switch building.direction {
-                            case .RIGHT: draw_char(ch_building, pos, scale, 0)
-                            case .DOWN: draw_char(ch_building, pos, scale, 90)
-                            case .LEFT: draw_char(ch_building, pos, scale, 180)
-                            case .UP: draw_char(ch_building, pos, scale, 270)
+                            case .RIGHT: draw_char('>', pos, scale, rl.DARKGRAY)
+                            case .DOWN: draw_char('~'+1, pos, scale, rl.DARKGRAY)
+                            case .LEFT: draw_char('<', pos, scale, rl.DARKGRAY)
+                            case .UP: draw_char('~'+2, pos, scale, rl.DARKGRAY)
                         }
                     case nil: 
-                    case Drill: draw_char(ch_building, pos, scale, 0)
+                    case Drill: draw_char(ch_building, pos, scale, BG_COLOR)
                 }
             }
         }
@@ -466,7 +443,7 @@ main :: proc() {
                     }
                     
                     ore_offset: rl.Vector2
-                    
+
                     switch conveyor.direction {
                         case .RIGHT: 
                             // MAGIC STUFF, DON`T TOUCH
@@ -510,10 +487,10 @@ main :: proc() {
             f32(cols/2 * char_width) * scale,
             f32(rows/2 * char_height) * scale
         }
-        draw_char('@', player_pos, scale)
+        draw_char('@', player_pos, scale, BG_COLOR)
 
         // RAMKA he is right
-        draw_border(0, 0, cols, rows)
+        draw_border(0, 0, cols, rows, BG_COLOR)
         
         if rows > STOOD_MENU_H && cols > STOOD_MENU_W && stood_menu {
         
@@ -529,7 +506,7 @@ main :: proc() {
                 case: fmt.println(building)
             }
             border_w := max(i32(len(text_building)+2), STOOD_MENU_W)
-            draw_border(0, 0, border_w, STOOD_MENU_H, true)
+            draw_border(0, 0, border_w, STOOD_MENU_H, BG_COLOR, fill = true)
             draw_text("STOOD ON:", {f32(char_width), f32(char_height)} * scale, scale)
             draw_text(text_ore, {f32(char_width), f32(char_height)*2} * scale, scale)
             draw_text(text_building, {f32(char_width), f32(char_height)*3} * scale, scale)
