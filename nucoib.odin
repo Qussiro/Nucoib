@@ -270,6 +270,7 @@ main :: proc() {
     fmt.println("Map size: ", 2*size_of(World), "Bytes")
     
     font_texture = rl.LoadTexture("./charmap-oldschool_white12.png")
+    // font_texture = rl.LoadTexture("./output.png")
     char_width = font_texture.width / COLS;
     char_height = font_texture.height / ROWS;
     
@@ -325,13 +326,17 @@ main :: proc() {
                         if building.ore_type == .NONE do continue
                         
                         building.transportation_progress += dt * TRANSPORTATION_SPEED
-                        
+
                         switch building.direction {
                         case .RIGHT: 
+                            max_progress: f32 = 1
                             if i+1 != WORLD_WIDTH { 
                                 conveyor, is_conveyor := &buildings[i+1][j].(Conveyor)
                                 if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .LEFT {
-                                    if building.transportation_progress >= 1 {
+                                    if conveyor.direction == .UP || conveyor.direction == .DOWN {
+                                        max_progress = 1.7
+                                    }
+                                    if building.transportation_progress >= max_progress {
                                         conveyor.ore_type = building.ore_type
                                         building.ore_type = .NONE
                                         building.transportation_progress = 0
@@ -342,26 +347,35 @@ main :: proc() {
                                     }
                                 }
                             }
+                            building.transportation_progress = min(building.transportation_progress, max_progress)
                         case .DOWN:
+                            max_progress: f32 = 1
                             if j+1 != WORLD_HEIGHT { 
                                 conveyor, is_conveyor := &buildings[i][j+1].(Conveyor)
                                 if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .UP {
-                                    if building.transportation_progress >= 1 {
+                                    if conveyor.direction == .LEFT || conveyor.direction == .RIGHT {
+                                        max_progress = 1.7 
+                                    }
+                                    if building.transportation_progress >= max_progress {
                                         conveyor.ore_type = building.ore_type
                                         building.ore_type = .NONE
                                         building.transportation_progress = 0
-                                        
                                         if conveyor.direction == .LEFT || conveyor.direction == .RIGHT {
                                             conveyor.transportation_progress = 0.7
                                         }
                                     }                                            
                                 }
                             }
+                            building.transportation_progress = min(building.transportation_progress, max_progress)
                         case .LEFT: 
+                            max_progress: f32 = 1
                             if i-1 >= 0 { 
                                 conveyor, is_conveyor := &buildings[i-1][j].(Conveyor)
                                 if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .RIGHT {
-                                    if building.transportation_progress >= 1 {
+                                    if conveyor.direction == .UP || conveyor.direction == .DOWN {
+                                        max_progress = 1.7
+                                    }
+                                    if building.transportation_progress >= max_progress {
                                         conveyor.ore_type = building.ore_type
                                         building.ore_type = .NONE
                                         building.transportation_progress = 0
@@ -372,11 +386,16 @@ main :: proc() {
                                     }
                                 }
                             }
+                            building.transportation_progress = min(building.transportation_progress, max_progress)
                         case .UP: 
+                            max_progress: f32 = 1
                             if j-1 >= 0 { 
                                 conveyor, is_conveyor := &buildings[i][j-1].(Conveyor)
                                 if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != .DOWN {
-                                    if building.transportation_progress >= 1 {
+                                    if conveyor.direction == .LEFT || conveyor.direction == .RIGHT {
+                                        max_progress = 1.7
+                                    } 
+                                    if building.transportation_progress >= max_progress {
                                         conveyor.ore_type = building.ore_type
                                         building.ore_type = .NONE
                                         building.transportation_progress = 0
@@ -387,8 +406,8 @@ main :: proc() {
                                     }
                                 }
                             }
+                            building.transportation_progress = min(building.transportation_progress, max_progress)
                         }
-                        building.transportation_progress = min(building.transportation_progress, 1)
                     case nil:
                 }
             }
