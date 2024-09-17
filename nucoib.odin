@@ -4,10 +4,10 @@ import "core:fmt"
 import "core:strings"
 import "core:math"
 import "core:math/rand"
-import rl "vendor:raylib"
 import "core:container/queue"
 import "core:slice"
 import "base:runtime"
+import rl "vendor:raylib"
 
 COLS                 :: 18
 ROWS                 :: 7
@@ -32,11 +32,11 @@ OFFSETS :: [Direction][2]i32 {
     .LEFT  = {-1, 0},
     .UP    = {0, -1},
 }
-PERPENDICULARS :: [Direction][2]Direction {
+PERPENDICULARS :: [Direction]bit_set[Direction] {
     .RIGHT = {.UP, .DOWN},
-    .DOWN = {.LEFT, .RIGHT},
-    .LEFT = {.UP, .DOWN},
-    .UP = {.LEFT, .RIGHT},
+    .DOWN  = {.LEFT, .RIGHT},
+    .LEFT  = {.UP, .DOWN},
+    .UP    = {.LEFT, .RIGHT},
 }
 OPPOSITE :: [Direction]Direction {
     .RIGHT = .LEFT,
@@ -48,10 +48,9 @@ OPPOSITE :: [Direction]Direction {
 World :: [WORLD_WIDTH][WORLD_HEIGHT]OreTile
 Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]BuildingTile
 
-
 Player :: struct { 
-    x : i32,
-    y : i32,
+    x: i32,
+    y: i32,
 }
 
 Drill :: struct {
@@ -73,7 +72,7 @@ BuildingTile :: union {
     Conveyor,
 }
 
-OreTile :: enum (u8) {
+OreTile :: enum u8 {
     NONE,
     IRON,
     TUNGSTEN,
@@ -188,7 +187,7 @@ grid_size :: proc() -> (i32, i32) {
     return rows, cols
 }
 
-input :: proc(dt : f32) {
+input :: proc(dt: f32) {
     if pressed_move > 0 do pressed_move -= dt
     else {
         if rl.IsKeyDown(rl.KeyboardKey.UP) && player.y > 0 {
@@ -275,7 +274,6 @@ check_boundaries :: proc(pos: [2]i32) -> bool {
     return pos.x >= 0 && pos.x < WORLD_WIDTH && pos.y >= 0 && pos.y < WORLD_HEIGHT  
 }
 
-
 main :: proc() {
     rl.InitWindow(window_width, window_height, "nucoib")
     rl.SetWindowState({.WINDOW_RESIZABLE})
@@ -352,7 +350,7 @@ main :: proc() {
                             if check_boundaries(next_pos) {
                                 conveyor, is_conveyor := &buildings[next_pos.x][next_pos.y].(Conveyor)
                                 if is_conveyor && conveyor.ore_type == .NONE && building.ore_count > 0 {
-                                    if slice.contains(perpendiculars[direction][:], conveyor.direction) do conveyor.transportation_progress = 0.7
+                                    if conveyor.direction in perpendiculars[direction] do conveyor.transportation_progress = 0.7
                                     building.ore_count -= 1
                                     conveyor.ore_type = building.ore_type
                                 }
@@ -371,7 +369,7 @@ main :: proc() {
                         if check_boundaries(next_pos) { 
                             conveyor, is_conveyor := &buildings[next_pos.x][next_pos.y].(Conveyor)
                             if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != opposite[building.direction] {
-                                match_perpendicular := slice.contains(perpendiculars[building.direction][:], conveyor.direction) 
+                                match_perpendicular := conveyor.direction in perpendiculars[building.direction] 
                                 
                                 if match_perpendicular do max_progress = 1.7
                                 
