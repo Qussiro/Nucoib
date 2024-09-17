@@ -293,7 +293,7 @@ main :: proc() {
         fmt.println("Need memory: ", size_of(Buildings), "Bytes")
     }
     
-    fmt.println("Map size: ", 2*size_of(World), "Bytes")
+    fmt.println("Map size: ", size_of(World) + size_of(Buildings), "Bytes")
     
     // font_texture = rl.LoadTexture("./charmap-oldschool_white12.png")
     font_texture = rl.LoadTexture("./output.png")
