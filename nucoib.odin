@@ -26,7 +26,7 @@ DRILLING_TIME        :: f32(2)
 TRANSPORTATION_SPEED :: f32(1)
 BG_COLOR             :: rl.Color {0x20, 0x20, 0x20, 0xFF}
 
-OFFSETS :: [Direction][2]i32 {
+OFFSETS :: [Direction][2]int {
     .Right = {1, 0},
     .Down  = {0, 1},
     .Left  = {-1, 0},
@@ -49,21 +49,21 @@ World :: [WORLD_WIDTH][WORLD_HEIGHT]OreTile
 Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]BuildingTile
 
 Player :: struct { 
-    x: i32,
-    y: i32,
+    x: int,
+    y: int,
 }
 
 Drill :: struct {
     ore_type:       OreTile,
-    ore_count:      i32,
-    capacity:       i32,
+    ore_count:      int,
+    capacity:       int,
     drilling_timer: f32,
 }
 
 Conveyor :: struct {
     direction:               Direction,
     ore_type:                OreTile,
-    capacity:                i32,
+    capacity:                int,
     transportation_progress: f32,
 }
 
@@ -90,14 +90,14 @@ world:                ^World
 buildings:            ^Buildings
 player:               Player
 font_texture:         rl.Texture2D
-char_width:           i32
-char_height:          i32
-grid_rows:            i32
-grid_cols:            i32
+char_width:           f32
+char_height:          f32
+grid_rows:            int
+grid_cols:            int
 pressed_move:         f32
 pressed_zoom:         f32
 stood_menu:           bool
-count_clusters_sizes: [CLUSTER_SIZE + 1]i32
+count_clusters_sizes: [CLUSTER_SIZE + 1]int
 text_buffer:          [512]u8
 
 window_width  := i32(1280)
@@ -154,9 +154,9 @@ cluster_generation :: proc(tile: OreTile) {
 }
 
 draw_text :: proc(text: string, pos: rl.Vector2, scale: f32) {
-    for i := 0; i < len(text); i+=1 {
+    for i := 0; i < len(text); i += 1 {
         char_pos := rl.Vector2 {
-            f32(i32(i) * char_width) * scale + pos.x,
+            f32(i) * char_width * scale + pos.x,
             pos.y,
         }
         draw_char(text[i], char_pos, scale)
@@ -165,26 +165,26 @@ draw_text :: proc(text: string, pos: rl.Vector2, scale: f32) {
 
 draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, rotation: f32 = 0) {
     source := rl.Rectangle {
-        x = f32(i32(c - 32) % ATLAS_COLS * char_width),
-        y = f32(i32(c - 32) / ATLAS_COLS * char_height),
-        width = f32(char_width),
-        height = f32(char_height),
+        x = f32(int(c - 32) % ATLAS_COLS) * char_width,
+        y = f32(int(c - 32) / ATLAS_COLS) * char_height,
+        width = char_width,
+        height = char_height,
     }
     dest := rl.Rectangle {
-        x = pos.x + f32(char_width)/2 * scale,
-        y = pos.y + f32(char_height)/2 * scale,
-        width = f32(char_width) * scale,
-        height = f32(char_height) * scale,
+        x = pos.x + char_width/2 * scale,
+        y = pos.y + char_height/2 * scale,
+        width = char_width * scale,
+        height = char_height * scale,
     }
-    origin := rl.Vector2 {f32(char_width), f32(char_height)}/2 * scale
+    origin := rl.Vector2 {char_width, char_height} / 2 * scale
 
     rl.DrawRectanglePro(dest, origin, rotation, bg_color)
     rl.DrawTexturePro(font_texture, source, dest, origin, rotation, fg_color) 
 }
 
-grid_size :: proc() -> (i32, i32) {
-    grid_rows := i32(f32(window_height) / (f32(char_height) * scale))
-    grid_cols := i32(f32(window_width) / (f32(char_width) * scale))
+grid_size :: proc() -> (int, int) {
+    grid_rows := int(f32(window_height) / (char_height * scale))
+    grid_cols := int(f32(window_width) / (char_width * scale))
     return grid_rows, grid_cols
 }
 
@@ -238,11 +238,11 @@ input :: proc(dt: f32) {
     }
 }
 
-draw_border :: proc(x, y, w, h: i32, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, fill: bool = false) {
-    for i := i32(0); i < w; i += 1 {
-        x := f32(i * char_width) * scale
+draw_border :: proc(x, y, w, h: int, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, fill: bool = false) {
+    for i := 0; i < w; i += 1 {
+        x := f32(i) * char_width * scale
         upper_pos := rl.Vector2 { x, 0 }
-        lower_pos := rl.Vector2 { x, f32((h - 1) * char_height) * scale }
+        lower_pos := rl.Vector2 { x, f32(h - 1) * char_height * scale }
         if (i == 0 || i == w - 1) {
             draw_char('+', upper_pos, scale, bg_color, fg_color)
             draw_char('+', lower_pos, scale, bg_color, fg_color)
@@ -251,19 +251,19 @@ draw_border :: proc(x, y, w, h: i32, bg_color: rl.Color = {}, fg_color: rl.Color
             draw_char('-', lower_pos, scale, bg_color, fg_color)
         }
     }
-    for i := i32(1); i < h - 1; i += 1 {
-        y := f32(i * char_height) * scale
+    for i := 1; i < h - 1; i += 1 {
+        y := f32(i) * char_height * scale
         left_pos := rl.Vector2 { 0, y }
-        right_pos := rl.Vector2 { f32((w - 1) * char_width) * scale, y }
+        right_pos := rl.Vector2 { f32(w - 1) * char_width * scale, y }
         draw_char('|', left_pos, scale, bg_color, fg_color)
         draw_char('|', right_pos, scale, bg_color, fg_color)
     }
     if fill {
-        for i := i32(1); i < w - 1; i += 1 {
-            for j := i32(1); j < h - 1; j += 1 {
+        for i := 1; i < w - 1; i += 1 {
+            for j := 1; j < h - 1; j += 1 {
                 char_pos := rl.Vector2 {
-                    f32(i * char_width) * scale,
-                    f32(j * char_height) * scale
+                    f32(i) * char_width * scale,
+                    f32(j) * char_height * scale
                 }
                 draw_char(' ', char_pos, scale, bg_color, fg_color)
             } 
@@ -271,7 +271,7 @@ draw_border :: proc(x, y, w, h: i32, bg_color: rl.Color = {}, fg_color: rl.Color
     }
 }
 
-check_boundaries :: proc(pos: [2]i32) -> bool {
+check_boundaries :: proc(pos: [2]int) -> bool {
     return pos.x >= 0 && pos.x < WORLD_WIDTH && pos.y >= 0 && pos.y < WORLD_HEIGHT  
 }
 
@@ -296,8 +296,8 @@ main :: proc() {
     
     // font_texture = rl.LoadTexture("./charmap-oldschool_white12.png")
     font_texture = rl.LoadTexture("./output.png")
-    char_width = font_texture.width / ATLAS_COLS;
-    char_height = font_texture.height / ATLAS_ROWS;
+    char_width = f32(int(font_texture.width) / ATLAS_COLS);
+    char_height = f32(int(font_texture.height) / ATLAS_ROWS);
     
     grid_rows, grid_cols = grid_size()
 
@@ -328,8 +328,8 @@ main :: proc() {
         
         input(dt)
 
-        for i: i32 = 0; i < WORLD_WIDTH; i += 1 {
-            for j: i32 = 0; j < WORLD_HEIGHT; j += 1 {
+        for i := 0; i < WORLD_WIDTH; i += 1 {
+            for j := 0; j < WORLD_HEIGHT; j += 1 {
                 switch &building in buildings[i][j]{
                     case Drill: 
                         if world[i][j] == .None do continue
@@ -346,7 +346,7 @@ main :: proc() {
                         opposite := OPPOSITE
                         perpendiculars := PERPENDICULARS
                         for direction in Direction{
-                            next_pos := [2]i32{i, j} + offsets[direction]
+                            next_pos := [2]int{i, j} + offsets[direction]
                         
                             if check_boundaries(next_pos) {
                                 conveyor, is_conveyor := &buildings[next_pos.x][next_pos.y].(Conveyor)
@@ -364,7 +364,7 @@ main :: proc() {
                         offsets := OFFSETS
                         opposite := OPPOSITE
                         perpendiculars := PERPENDICULARS
-                        next_pos := [2]i32{i, j} + offsets[building.direction]
+                        next_pos := [2]int{i, j} + offsets[building.direction]
                         max_progress: f32 = 1
                         
                         if check_boundaries(next_pos) { 
@@ -412,8 +412,8 @@ main :: proc() {
                 }
                 
                 pos := rl.Vector2 {
-                    f32((i - player.x + grid_cols/2) * char_width) * scale,
-                    f32((j - player.y + grid_rows/2) * char_height) * scale
+                    f32(i - player.x + grid_cols/2) * char_width * scale,
+                    f32(j - player.y + grid_rows/2) * char_height * scale
                 }
 
                 draw_char(ch_ore, pos, scale)
@@ -437,8 +437,8 @@ main :: proc() {
                 conveyor, is_conveyor := &buildings[i][j].(Conveyor)
                 if is_conveyor && conveyor.ore_type != .None {
                     pos := rl.Vector2 {
-                        f32((i - player.x + grid_cols/2) * char_width) * scale,
-                        f32((j - player.y + grid_rows/2) * char_height) * scale
+                        f32(i - player.x + grid_cols/2) * char_width * scale,
+                        f32(j - player.y + grid_rows/2) * char_height * scale
                     }
                     
                     ore_offset: rl.Vector2
@@ -447,23 +447,23 @@ main :: proc() {
                         case .Right: 
                             // MAGIC STUFF, DON`T TOUCH
                             ore_offset =  {
-                                f32(char_width)*scale*(conveyor.transportation_progress-ORE_SCALE), 
-                                f32(char_height)*scale*(1./2-1./2*ORE_SCALE)
+                                char_width * scale * (conveyor.transportation_progress - ORE_SCALE), 
+                                char_height * scale * (0.5 - 0.5*ORE_SCALE)
                             }
                         case .Down:
                             ore_offset =  {
-                                f32(char_width)*scale*(1./2-1./2*ORE_SCALE),
-                                f32(char_height)*scale*(conveyor.transportation_progress-ORE_SCALE)
+                                char_width * scale * (0.5 - 0.5*ORE_SCALE),
+                                char_height * scale * (conveyor.transportation_progress - ORE_SCALE)
                             } 
                         case .Left: 
                             ore_offset = rl.Vector2 {
-                                f32(char_width)*scale*(1-conveyor.transportation_progress), 
-                                f32(char_height)*scale*(1./2-1./2*ORE_SCALE)
+                                char_width * scale * (1 - conveyor.transportation_progress), 
+                                char_height * scale * (0.5 - 0.5*ORE_SCALE)
                             }
                         case .Up:
                             ore_offset =  {
-                                f32(char_width)*scale*(1./2-1./2*ORE_SCALE),
-                                f32(char_height)*scale*(1-conveyor.transportation_progress) 
+                                char_width * scale * (0.5 - 0.5*ORE_SCALE),
+                                char_height * scale * (1 - conveyor.transportation_progress) 
                             } 
                     }
 
@@ -476,15 +476,15 @@ main :: proc() {
                         case: unimplemented("BRUH!")
                     }
     
-                    draw_char(c, ore_offset,scale*ORE_SCALE)
+                    draw_char(c, ore_offset, scale * ORE_SCALE)
                 }
     
             }
         }
         // PLAYER
         player_pos := rl.Vector2 {
-            f32(grid_cols/2 * char_width) * scale,
-            f32(grid_rows/2 * char_height) * scale
+            f32(grid_cols/2) * char_width * scale,
+            f32(grid_rows/2) * char_height * scale
         }
         draw_char('@', player_pos, scale, BG_COLOR)
 
@@ -504,11 +504,11 @@ main :: proc() {
                 case nil: text_building = fmt.bprintf(text_buffer[len(text_ore):], "None")
                 case: fmt.println(building)
             }
-            border_w := max(i32(len(text_building)+2), STOOD_MENU_WIDTH)
+            border_w := max(len(text_building) + 2, STOOD_MENU_WIDTH)
             draw_border(0, 0, border_w, STOOD_MENU_HEIGHT, BG_COLOR, fill = true)
-            draw_text("STOOD ON:", {f32(char_width), f32(char_height)} * scale, scale)
-            draw_text(text_ore, {f32(char_width), f32(char_height)*2} * scale, scale)
-            draw_text(text_building, {f32(char_width), f32(char_height)*3} * scale, scale)
+            draw_text("STOOD ON:",   {char_width, char_height*1} * scale, scale)
+            draw_text(text_ore,      {char_width, char_height*2} * scale, scale)
+            draw_text(text_building, {char_width, char_height*3} * scale, scale)
         }
         
         rl.DrawFPS(14, 14)
