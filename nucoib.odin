@@ -9,10 +9,10 @@ import "core:slice"
 import "base:runtime"
 import rl "vendor:raylib"
 
-COLS                 :: 18
-ROWS                 :: 7
-STOOD_MENU_H         :: 5
-STOOD_MENU_W         :: 17
+ATLAS_COLS           :: 18
+ATLAS_ROWS           :: 7
+STOOD_MENU_HEIGHT    :: 5
+STOOD_MENU_WIDTH     :: 17
 WORLD_WIDTH          :: 1000
 WORLD_HEIGHT         :: 1000
 CLUSTER_SIZE         :: 100
@@ -27,22 +27,22 @@ TRANSPORTATION_SPEED :: f32(1)
 BG_COLOR             :: rl.Color {0x20, 0x20, 0x20, 0xFF}
 
 OFFSETS :: [Direction][2]i32 {
-    .RIGHT = {1, 0},
-    .DOWN  = {0, 1},
-    .LEFT  = {-1, 0},
-    .UP    = {0, -1},
+    .Right = {1, 0},
+    .Down  = {0, 1},
+    .Left  = {-1, 0},
+    .Up    = {0, -1},
 }
 PERPENDICULARS :: [Direction]bit_set[Direction] {
-    .RIGHT = {.UP, .DOWN},
-    .DOWN  = {.LEFT, .RIGHT},
-    .LEFT  = {.UP, .DOWN},
-    .UP    = {.LEFT, .RIGHT},
+    .Right = {.Up, .Down},
+    .Down  = {.Left, .Right},
+    .Left  = {.Up, .Down},
+    .Up    = {.Left, .Right},
 }
 OPPOSITE :: [Direction]Direction {
-    .RIGHT = .LEFT,
-    .LEFT  = .RIGHT,
-    .DOWN  = .UP,
-    .UP    = .DOWN,
+    .Right = .Left,
+    .Left  = .Right,
+    .Down  = .Up,
+    .Up    = .Down,
 }
 
 World :: [WORLD_WIDTH][WORLD_HEIGHT]OreTile
@@ -54,17 +54,17 @@ Player :: struct {
 }
 
 Drill :: struct {
-    ore_type: OreTile,
-    ore_count: i32,
+    ore_type:       OreTile,
+    ore_count:      i32,
+    capacity:       i32,
     drilling_timer: f32,
-    capacity: i32,
 }
 
 Conveyor :: struct {
-    ore_type: OreTile,
-    capacity: i32,
+    direction:               Direction,
+    ore_type:                OreTile,
+    capacity:                i32,
     transportation_progress: f32,
-    direction: Direction,
 }
 
 BuildingTile :: union {
@@ -73,36 +73,37 @@ BuildingTile :: union {
 }
 
 OreTile :: enum u8 {
-    NONE,
-    IRON,
-    TUNGSTEN,
-    COAL,
+    None,
+    Iron,
+    Tungsten,
+    Coal,
 }
 
 Direction :: enum {
-   RIGHT,
-   DOWN,
-   LEFT,
-   UP, 
+   Right,
+   Down,
+   Left,
+   Up, 
 }
 
-window_width := i32(1280)
-window_height := i32(720)
-world: ^World
-buildings: ^Buildings
-player: Player
-char_width: i32
-char_height: i32
-font_texture: rl.Texture2D
+world:                ^World
+buildings:            ^Buildings
+player:               Player
+font_texture:         rl.Texture2D
+char_width:           i32
+char_height:          i32
+grid_rows:            i32
+grid_cols:            i32
+pressed_move:         f32
+pressed_zoom:         f32
+stood_menu:           bool
 count_clusters_sizes: [CLUSTER_SIZE + 1]i32
-scale := f32(2)
-rows: i32
-cols: i32
-pressed_move: f32
-pressed_zoom: f32
-direction := Direction.RIGHT
-text_buffer: [512]u8
-stood_menu: bool
+text_buffer:          [512]u8
+
+window_width  := i32(1280)
+window_height := i32(720)
+scale         := f32(2)
+direction     := Direction.Right
 
 cluster_generation :: proc(tile: OreTile) {
     Point :: [2]i32
@@ -164,8 +165,8 @@ draw_text :: proc(text: string, pos: rl.Vector2, scale: f32) {
 
 draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, rotation: f32 = 0) {
     source := rl.Rectangle {
-        x = f32(i32(c - 32) % COLS * char_width),
-        y = f32(i32(c - 32) / COLS * char_height),
+        x = f32(i32(c - 32) % ATLAS_COLS * char_width),
+        y = f32(i32(c - 32) / ATLAS_COLS * char_height),
         width = f32(char_width),
         height = f32(char_height),
     }
@@ -182,9 +183,9 @@ draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, bg_color: rl.Color = {}, f
 }
 
 grid_size :: proc() -> (i32, i32) {
-    rows := i32(f32(window_height) / (f32(char_height) * scale))
-    cols := i32(f32(window_width) / (f32(char_width) * scale))
-    return rows, cols
+    grid_rows := i32(f32(window_height) / (f32(char_height) * scale))
+    grid_cols := i32(f32(window_width) / (f32(char_width) * scale))
+    return grid_rows, grid_cols
 }
 
 input :: proc(dt: f32) {
@@ -209,11 +210,11 @@ input :: proc(dt: f32) {
     else {
         if rl.IsKeyPressed(rl.KeyboardKey.MINUS) {
             scale = max(MIN_SCALE, scale*0.9)
-            rows, cols = grid_size()
+            grid_rows, grid_cols = grid_size()
         }
         if rl.IsKeyPressed(rl.KeyboardKey.EQUAL) {
             scale = min(scale*1.1, MAX_SCALE)
-            rows, cols = grid_size()
+            grid_rows, grid_cols = grid_size()
         }
         pressed_zoom = ZOOM_COOLDOWN
     }
@@ -295,10 +296,10 @@ main :: proc() {
     
     // font_texture = rl.LoadTexture("./charmap-oldschool_white12.png")
     font_texture = rl.LoadTexture("./output.png")
-    char_width = font_texture.width / COLS;
-    char_height = font_texture.height / ROWS;
+    char_width = font_texture.width / ATLAS_COLS;
+    char_height = font_texture.height / ATLAS_ROWS;
     
-    rows, cols = grid_size()
+    grid_rows, grid_cols = grid_size()
 
     player.x = WORLD_WIDTH / 2
     player.y = WORLD_HEIGHT / 2
@@ -319,7 +320,7 @@ main :: proc() {
             window_width = rl.GetScreenWidth()
             window_height = rl.GetScreenHeight()
 
-            rows, cols = grid_size()
+            grid_rows, grid_cols = grid_size()
         }
         
         rl.ClearBackground(BG_COLOR)
@@ -331,9 +332,9 @@ main :: proc() {
             for j: i32 = 0; j < WORLD_HEIGHT; j += 1 {
                 switch &building in buildings[i][j]{
                     case Drill: 
-                        if world[i][j] == .NONE do continue
+                        if world[i][j] == .None do continue
 
-                        assert(building.ore_type == world[i][j] || building.ore_type == .NONE, "Smth wrong with ur ORES!!! FIX IT!")
+                        assert(building.ore_type == world[i][j] || building.ore_type == .None, "Smth wrong with ur ORES!!! FIX IT!")
                         building.ore_type = world[i][j]
                         if building.drilling_timer >= DRILLING_TIME {
                             if building.ore_count < building.capacity do building.ore_count += 1
@@ -349,7 +350,7 @@ main :: proc() {
                         
                             if check_boundaries(next_pos) {
                                 conveyor, is_conveyor := &buildings[next_pos.x][next_pos.y].(Conveyor)
-                                if is_conveyor && conveyor.ore_type == .NONE && building.ore_count > 0 {
+                                if is_conveyor && conveyor.ore_type == .None && building.ore_count > 0 {
                                     if conveyor.direction in perpendiculars[direction] do conveyor.transportation_progress = 0.7
                                     building.ore_count -= 1
                                     conveyor.ore_type = building.ore_type
@@ -357,7 +358,7 @@ main :: proc() {
                             }
                         }
                     case Conveyor:
-                        if building.ore_type == .NONE do continue
+                        if building.ore_type == .None do continue
                         
                         building.transportation_progress += dt * TRANSPORTATION_SPEED
                         offsets := OFFSETS
@@ -368,14 +369,14 @@ main :: proc() {
                         
                         if check_boundaries(next_pos) { 
                             conveyor, is_conveyor := &buildings[next_pos.x][next_pos.y].(Conveyor)
-                            if is_conveyor && conveyor.ore_type == .NONE && conveyor.direction != opposite[building.direction] {
+                            if is_conveyor && conveyor.ore_type == .None && conveyor.direction != opposite[building.direction] {
                                 match_perpendicular := conveyor.direction in perpendiculars[building.direction] 
                                 
                                 if match_perpendicular do max_progress = 1.7
                                 
                                 if building.transportation_progress >= max_progress {
                                     conveyor.ore_type = building.ore_type
-                                    building.ore_type = .NONE
+                                    building.ore_type = .None
                                     building.transportation_progress = 0
                                 
                                     if match_perpendicular do conveyor.transportation_progress = 0.7
@@ -388,20 +389,20 @@ main :: proc() {
             }
         }
 
-        first_col := max(0, player.x - cols/2)
-        last_col  := min(player.x + cols/2, WORLD_WIDTH)
-        first_row := max(0, player.y - rows/2)
-        last_row  := min(player.y + rows/2, WORLD_HEIGHT)
+        first_col := max(0, player.x - grid_cols/2)
+        last_col  := min(player.x + grid_cols/2, WORLD_WIDTH)
+        first_row := max(0, player.y - grid_rows/2)
+        last_row  := min(player.y + grid_rows/2, WORLD_HEIGHT)
         
         for i := first_col; i < last_col; i += 1 {
             for j := first_row; j < last_row; j += 1 {
                 ch_ore: u8
                 ch_building: u8
                 #partial switch world[i][j] {
-                    case .NONE:     ch_ore = ' '
-                    case .IRON:     ch_ore = 'I'
-                    case .TUNGSTEN: ch_ore = 'T'
-                    case .COAL:     ch_ore = 'C'
+                    case .None:     ch_ore = ' '
+                    case .Iron:     ch_ore = 'I'
+                    case .Tungsten: ch_ore = 'T'
+                    case .Coal:     ch_ore = 'C'
                     case: unimplemented("BRUH!")
                 }
                 switch _ in buildings[i][j] {
@@ -411,8 +412,8 @@ main :: proc() {
                 }
                 
                 pos := rl.Vector2 {
-                    f32((i - player.x + cols/2) * char_width) * scale,
-                    f32((j - player.y + rows/2) * char_height) * scale
+                    f32((i - player.x + grid_cols/2) * char_width) * scale,
+                    f32((j - player.y + grid_rows/2) * char_height) * scale
                 }
 
                 draw_char(ch_ore, pos, scale)
@@ -420,10 +421,10 @@ main :: proc() {
                 switch building in buildings[i][j] {
                     case Conveyor:
                         switch building.direction {
-                            case .RIGHT: draw_char('>', pos, scale, rl.DARKGRAY)
-                            case .DOWN: draw_char('~'+1, pos, scale, rl.DARKGRAY)
-                            case .LEFT: draw_char('<', pos, scale, rl.DARKGRAY)
-                            case .UP: draw_char('~'+2, pos, scale, rl.DARKGRAY)
+                            case .Right: draw_char('>', pos, scale, rl.DARKGRAY)
+                            case .Down: draw_char('~'+1, pos, scale, rl.DARKGRAY)
+                            case .Left: draw_char('<', pos, scale, rl.DARKGRAY)
+                            case .Up: draw_char('~'+2, pos, scale, rl.DARKGRAY)
                         }
                     case nil: 
                     case Drill: draw_char(ch_building, pos, scale, BG_COLOR)
@@ -434,32 +435,32 @@ main :: proc() {
         for i := first_col; i < last_col; i += 1 {
             for j := first_row; j < last_row; j += 1 {
                 conveyor, is_conveyor := &buildings[i][j].(Conveyor)
-                if is_conveyor && conveyor.ore_type != .NONE {
+                if is_conveyor && conveyor.ore_type != .None {
                     pos := rl.Vector2 {
-                        f32((i - player.x + cols/2) * char_width) * scale,
-                        f32((j - player.y + rows/2) * char_height) * scale
+                        f32((i - player.x + grid_cols/2) * char_width) * scale,
+                        f32((j - player.y + grid_rows/2) * char_height) * scale
                     }
                     
                     ore_offset: rl.Vector2
 
                     switch conveyor.direction {
-                        case .RIGHT: 
+                        case .Right: 
                             // MAGIC STUFF, DON`T TOUCH
                             ore_offset =  {
                                 f32(char_width)*scale*(conveyor.transportation_progress-ORE_SCALE), 
                                 f32(char_height)*scale*(1./2-1./2*ORE_SCALE)
                             }
-                        case .DOWN:
+                        case .Down:
                             ore_offset =  {
                                 f32(char_width)*scale*(1./2-1./2*ORE_SCALE),
                                 f32(char_height)*scale*(conveyor.transportation_progress-ORE_SCALE)
                             } 
-                        case .LEFT: 
+                        case .Left: 
                             ore_offset = rl.Vector2 {
                                 f32(char_width)*scale*(1-conveyor.transportation_progress), 
                                 f32(char_height)*scale*(1./2-1./2*ORE_SCALE)
                             }
-                        case .UP:
+                        case .Up:
                             ore_offset =  {
                                 f32(char_width)*scale*(1./2-1./2*ORE_SCALE),
                                 f32(char_height)*scale*(1-conveyor.transportation_progress) 
@@ -469,9 +470,9 @@ main :: proc() {
                     ore_offset += pos
                     c: u8
                     #partial switch conveyor.ore_type {
-                        case .IRON:     c = 'I'
-                        case .TUNGSTEN: c = 'T'
-                        case .COAL:     c = 'C'
+                        case .Iron:     c = 'I'
+                        case .Tungsten: c = 'T'
+                        case .Coal:     c = 'C'
                         case: unimplemented("BRUH!")
                     }
     
@@ -482,15 +483,15 @@ main :: proc() {
         }
         // PLAYER
         player_pos := rl.Vector2 {
-            f32(cols/2 * char_width) * scale,
-            f32(rows/2 * char_height) * scale
+            f32(grid_cols/2 * char_width) * scale,
+            f32(grid_rows/2 * char_height) * scale
         }
         draw_char('@', player_pos, scale, BG_COLOR)
 
         // RAMKA he is right
-        draw_border(0, 0, cols, rows, BG_COLOR)
+        draw_border(0, 0, grid_cols, grid_rows, BG_COLOR)
         
-        if rows > STOOD_MENU_H && cols > STOOD_MENU_W && stood_menu {
+        if grid_rows > STOOD_MENU_HEIGHT && grid_cols > STOOD_MENU_WIDTH && stood_menu {
         
             // Ore text
             text_ore := fmt.bprintf(text_buffer[:], "%v", world[player.x][player.y])
@@ -500,11 +501,11 @@ main :: proc() {
             switch building in buildings[player.x][player.y] {
                 case Drill: text_building = fmt.bprintf(text_buffer[len(text_ore):], "DRILL[%v:%v]", building.ore_type, building.ore_count)
                 case Conveyor: text_building = fmt.bprintf(text_buffer[len(text_ore):], "CONVEYOR_%v[%v]", building.direction, building.ore_type)
-                case nil: text_building = fmt.bprintf(text_buffer[len(text_ore):], "NONE")
+                case nil: text_building = fmt.bprintf(text_buffer[len(text_ore):], "None")
                 case: fmt.println(building)
             }
-            border_w := max(i32(len(text_building)+2), STOOD_MENU_W)
-            draw_border(0, 0, border_w, STOOD_MENU_H, BG_COLOR, fill = true)
+            border_w := max(i32(len(text_building)+2), STOOD_MENU_WIDTH)
+            draw_border(0, 0, border_w, STOOD_MENU_HEIGHT, BG_COLOR, fill = true)
             draw_text("STOOD ON:", {f32(char_width), f32(char_height)} * scale, scale)
             draw_text(text_ore, {f32(char_width), f32(char_height)*2} * scale, scale)
             draw_text(text_building, {f32(char_width), f32(char_height)*3} * scale, scale)
