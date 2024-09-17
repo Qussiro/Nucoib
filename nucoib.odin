@@ -228,13 +228,13 @@ input :: proc(dt: f32) {
     }
     if rl.IsKeyPressed(rl.KeyboardKey.GRAVE) {
         stood_menu = !stood_menu
-        fmt.println("Stood_menu:",stood_menu)
+        fmt.println("Stood_menu:", stood_menu)
     }
     if rl.IsKeyDown(rl.KeyboardKey.C) {
         buildings[player.x][player.y] = Conveyor{direction = direction}
     }
-    if rl.IsKeyDown(rl.KeyboardKey.LEFT_SHIFT) && rl.IsKeyDown(rl.KeyboardKey.D){
-        buildings[player.x][player.y] = BuildingTile{}
+    if rl.IsKeyDown(rl.KeyboardKey.LEFT_SHIFT) && rl.IsKeyDown(rl.KeyboardKey.D) {
+        buildings[player.x][player.y] = {}
     }
 }
 
@@ -313,6 +313,9 @@ main :: proc() {
     //     fmt.println(i, ":", v)
     // }
     
+    offsets := OFFSETS
+    opposite := OPPOSITE
+    perpendiculars := PERPENDICULARS
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
         
@@ -330,7 +333,8 @@ main :: proc() {
 
         for i := 0; i < WORLD_WIDTH; i += 1 {
             for j := 0; j < WORLD_HEIGHT; j += 1 {
-                switch &building in buildings[i][j]{
+                switch &building in buildings[i][j] {
+                    case nil:
                     case Drill: 
                         if world[i][j] == .None do continue
 
@@ -342,9 +346,6 @@ main :: proc() {
                         }
                         building.drilling_timer += dt
 
-                        offsets := OFFSETS
-                        opposite := OPPOSITE
-                        perpendiculars := PERPENDICULARS
                         for direction in Direction{
                             next_pos := [2]int{i, j} + offsets[direction]
                         
@@ -361,9 +362,6 @@ main :: proc() {
                         if building.ore_type == .None do continue
                         
                         building.transportation_progress += dt * TRANSPORTATION_SPEED
-                        offsets := OFFSETS
-                        opposite := OPPOSITE
-                        perpendiculars := PERPENDICULARS
                         next_pos := [2]int{i, j} + offsets[building.direction]
                         max_progress: f32 = 1
                         
@@ -384,7 +382,6 @@ main :: proc() {
                             }
                         }
                         building.transportation_progress = min(building.transportation_progress, max_progress)
-                    case nil:
                 }
             }
         }
@@ -397,18 +394,12 @@ main :: proc() {
         for i := first_col; i < last_col; i += 1 {
             for j := first_row; j < last_row; j += 1 {
                 ch_ore: u8
-                ch_building: u8
                 #partial switch world[i][j] {
                     case .None:     ch_ore = ' '
                     case .Iron:     ch_ore = 'I'
                     case .Tungsten: ch_ore = 'T'
                     case .Coal:     ch_ore = 'C'
-                    case: unimplemented("BRUH!")
-                }
-                switch _ in buildings[i][j] {
-                    case nil:      ch_building = ' '
-                    case Drill:     ch_building = 'D'
-                    case Conveyor:  ch_building = '>'
+                    case: panic(fmt.aprintf("Unknown ore type: %v", world[i][j]))
                 }
                 
                 pos := rl.Vector2 {
@@ -419,15 +410,15 @@ main :: proc() {
                 draw_char(ch_ore, pos, scale)
                 
                 switch building in buildings[i][j] {
+                    case nil: 
                     case Conveyor:
                         switch building.direction {
                             case .Right: draw_char('>', pos, scale, rl.DARKGRAY)
-                            case .Down: draw_char('~'+1, pos, scale, rl.DARKGRAY)
-                            case .Left: draw_char('<', pos, scale, rl.DARKGRAY)
-                            case .Up: draw_char('~'+2, pos, scale, rl.DARKGRAY)
+                            case .Left:  draw_char('<', pos, scale, rl.DARKGRAY)
+                            case .Down:  draw_char('~'+1, pos, scale, rl.DARKGRAY)
+                            case .Up:    draw_char('~'+2, pos, scale, rl.DARKGRAY)
                         }
-                    case nil: 
-                    case Drill: draw_char(ch_building, pos, scale, BG_COLOR)
+                    case Drill: draw_char('D', pos, scale, BG_COLOR)
                 }
             }
         }
@@ -443,9 +434,9 @@ main :: proc() {
                     
                     ore_offset: rl.Vector2
 
+                    // MAGIC STUFF, DON`T TOUCH
                     switch conveyor.direction {
-                        case .Right: 
-                            // MAGIC STUFF, DON`T TOUCH
+                        case .Right:
                             ore_offset =  {
                                 char_width * scale * (conveyor.transportation_progress - ORE_SCALE), 
                                 char_height * scale * (0.5 - 0.5*ORE_SCALE)
@@ -473,14 +464,14 @@ main :: proc() {
                         case .Iron:     c = 'I'
                         case .Tungsten: c = 'T'
                         case .Coal:     c = 'C'
-                        case: unimplemented("BRUH!")
+                        case: panic(fmt.aprintf("Unknown ore type: %v", conveyor.ore_type))
                     }
     
                     draw_char(c, ore_offset, scale * ORE_SCALE)
                 }
-    
             }
         }
+
         // PLAYER
         player_pos := rl.Vector2 {
             f32(grid_cols/2) * char_width * scale,
@@ -492,18 +483,18 @@ main :: proc() {
         draw_border(0, 0, grid_cols, grid_rows, BG_COLOR)
         
         if grid_rows > STOOD_MENU_HEIGHT && grid_cols > STOOD_MENU_WIDTH && stood_menu {
-        
             // Ore text
             text_ore := fmt.bprintf(text_buffer[:], "%v", world[player.x][player.y])
 
-            text_building: string
             // Building text
+            text_building: string
             switch building in buildings[player.x][player.y] {
-                case Drill: text_building = fmt.bprintf(text_buffer[len(text_ore):], "DRILL[%v:%v]", building.ore_type, building.ore_count)
+                case nil:      text_building = fmt.bprintf(text_buffer[len(text_ore):], "None")
+                case Drill:    text_building = fmt.bprintf(text_buffer[len(text_ore):], "DRILL[%v:%v]", building.ore_type, building.ore_count)
                 case Conveyor: text_building = fmt.bprintf(text_buffer[len(text_ore):], "CONVEYOR_%v[%v]", building.direction, building.ore_type)
-                case nil: text_building = fmt.bprintf(text_buffer[len(text_ore):], "None")
-                case: fmt.println(building)
+                case: panic(fmt.aprintf("Unknown building type %v", building))
             }
+
             border_w := max(len(text_building) + 2, STOOD_MENU_WIDTH)
             draw_border(0, 0, border_w, STOOD_MENU_HEIGHT, BG_COLOR, fill = true)
             draw_text("STOOD ON:",   {char_width, char_height*1} * scale, scale)
