@@ -8,6 +8,9 @@ import "core:container/queue"
 import "core:slice"
 import "base:runtime"
 import rl "vendor:raylib"
+import gl "vendor:OpenGL"
+import glfwb "vendor:glfw/bindings"
+import glfw "vendor:glfw"
 
 ATLAS_COLS           :: 18
 ATLAS_ROWS           :: 7
@@ -105,6 +108,12 @@ window_height := i32(720)
 scale         := f32(2)
 direction     := Direction.Right
 
+vertices := [?]f32 {
+    -0.5, -0.5, 0.0,
+     0.5, -0.5, 0.0,
+     0.0,  0.5, 0.0
+};
+  
 cluster_generation :: proc(tile: OreTile) {
     Point :: [2]i32
     
@@ -316,8 +325,31 @@ main :: proc() {
     offsets := OFFSETS
     opposite := OPPOSITE
     perpendiculars := PERPENDICULARS
+
+    avg_update_time: f64
+    avg_render_time: f64
+    time_count: int 
+
+    gl.load_up_to(3,3,glfw.gl_set_proc_address)
+    VAO: u32
+    gl.GenVertexArrays(1, &VAO)  
+    gl.BindVertexArray(VAO)
+    VBO: u32
+    gl.GenBuffers(1,&VBO)
+    gl.BindBuffer(gl.ARRAY_BUFFER, VBO)  
+    gl.BufferData(gl.ARRAY_BUFFER, len(vertices)*size_of(vertices[0]), &vertices[0], gl.STATIC_DRAW)
+    shader := rl.LoadShader("./shader.vert", "./shader.frag")
+    gl.VertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 3 * size_of(f32), uintptr(0))
+    gl.EnableVertexAttribArray(0)
+
+    
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
+
+        
+                
+        time_time := rl.GetTime()
+        time_count += 1 
         
         if rl.IsWindowResized() {
             window_width = rl.GetScreenWidth()
@@ -330,7 +362,7 @@ main :: proc() {
         dt := rl.GetFrameTime()
         
         input(dt)
-
+        
         for i := 0; i < WORLD_WIDTH; i += 1 {
             for j := 0; j < WORLD_HEIGHT; j += 1 {
                 switch &building in buildings[i][j] {
@@ -386,6 +418,9 @@ main :: proc() {
             }
         }
 
+        avg_update_time += rl.GetTime() - time_time
+        time_time = rl.GetTime()
+        
         first_col := max(0, player.x - grid_cols/2)
         last_col  := min(player.x + grid_cols/2, WORLD_WIDTH)
         first_row := max(0, player.y - grid_rows/2)
@@ -418,7 +453,7 @@ main :: proc() {
                             case .Down:  draw_char('~'+1, pos, scale, rl.DARKGRAY)
                             case .Up:    draw_char('~'+2, pos, scale, rl.DARKGRAY)
                         }
-                    case Drill: draw_char('D', pos, scale, BG_COLOR)
+                    case Drill: draw_char('D', pos, scale, BG_COLOR, fg_color = rl.MAGENTA)
                 }
             }
         }
@@ -467,7 +502,7 @@ main :: proc() {
                         case: panic(fmt.aprintf("Unknown ore type: %v", conveyor.ore_type))
                     }
     
-                    draw_char(c, ore_offset, scale * ORE_SCALE)
+                    draw_char(c, ore_offset, scale * ORE_SCALE, fg_color = rl.GOLD)
                 }
             }
         }
@@ -497,12 +532,22 @@ main :: proc() {
 
             border_w := max(len(text_building) + 2, STOOD_MENU_WIDTH)
             draw_border(0, 0, border_w, STOOD_MENU_HEIGHT, BG_COLOR, fill = true)
-            draw_text("STOOD ON:",   {char_width, char_height*1} * scale, scale)
-            draw_text(text_ore,      {char_width, char_height*2} * scale, scale)
-            draw_text(text_building, {char_width, char_height*3} * scale, scale)
+            draw_text("STOOD ON:",   {char_width, char_height * 1} * scale, scale)
+            draw_text(text_ore,      {char_width, char_height * 2} * scale, scale)
+            draw_text(text_building, {char_width, char_height * 3} * scale, scale)
         }
         
+        avg_render_time += rl.GetTime() - time_time
+        
+        gl.UseProgram(shader.id)
+        gl.BindVertexArray(VAO)
+        gl.DrawArrays(gl.TRIANGLES, 0, 3)
         rl.DrawFPS(14, 14)
         rl.EndDrawing()
-    }    
+    }   
+
+    avg_update_time = avg_update_time / f64(time_count)
+    avg_render_time = avg_render_time / f64(time_count)
+    fmt.println("avg_update_time: ", avg_update_time)
+    fmt.println("avg_render_time: ", avg_render_time)
 }
