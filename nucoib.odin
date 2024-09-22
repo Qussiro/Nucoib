@@ -186,6 +186,10 @@ grid_size :: proc() -> (int, int) {
     return grid_rows, grid_cols
 }
 
+building_tile :: proc(pos: [2]int) -> ^BuildingTile {
+    return &buildings[pos.x][pos.y]
+}
+
 input :: proc(dt: f32) {
     if pressed_move > 0 do pressed_move -= dt
     else {
@@ -218,7 +222,17 @@ input :: proc(dt: f32) {
     }
     
     if rl.IsKeyDown(rl.KeyboardKey.D) {
-        buildings[player.x][player.y] = Drill{capacity = 10}
+        player_pos: [2]int = {player.x, player.y}
+        if check_boundaries(player_pos+1) {
+            for i := player.x - 1; i < player.x + 2; i += 1 {
+                for j := player.y - 1; j < player.y + 2; j += 1 {
+                     if check_boundaries({i, j}) {
+                         if drill, ok := &buildings[i][j].(Drill); ok || i >= player.x && j >= player.y do buildings[i][j] = nil
+                     }   
+                }
+            } 
+            buildings[player.x][player.y] = Drill{capacity = 10} 
+        }
     }
     if rl.IsKeyPressed(rl.KeyboardKey.R) {
         direction = Direction((i32(direction) + 1) % (i32(max(Direction)) + 1))
@@ -444,7 +458,7 @@ main :: proc() {
                             case .Down:  draw_char('~'+1, pos, scale)
                             case .Up:    draw_char('~'+2, pos, scale)
                         }
-                    case Drill: draw_char('D', pos, scale, rl.MAGENTA)
+                    case Drill: draw_char('D', pos, 2*scale, rl.MAGENTA)
                 }
             }
         }
