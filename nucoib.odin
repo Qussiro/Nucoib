@@ -163,7 +163,7 @@ draw_text :: proc(text: string, pos: rl.Vector2, scale: f32) {
     }
 }
 
-draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, rotation: f32 = 0) {
+draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, fg_color: rl.Color = rl.WHITE) {
     source := rl.Rectangle {
         x = f32(int(c - 32) % ATLAS_COLS) * char_width,
         y = f32(int(c - 32) / ATLAS_COLS) * char_height,
@@ -171,15 +171,13 @@ draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, bg_color: rl.Color = {}, f
         height = char_height,
     }
     dest := rl.Rectangle {
-        x = pos.x + char_width/2 * scale,
-        y = pos.y + char_height/2 * scale,
+        x = pos.x,
+        y = pos.y,
         width = char_width * scale,
         height = char_height * scale,
     }
-    origin := rl.Vector2 {char_width, char_height} / 2 * scale
-
-    rl.DrawRectanglePro(dest, origin, rotation, bg_color)
-    rl.DrawTexturePro(font_texture, source, dest, origin, rotation, fg_color) 
+    // rl.DrawRectanglePro(dest, origin, rotation, bg_color)
+    rl.DrawTexturePro(font_texture, source, dest, {}, 0, fg_color) 
 }
 
 grid_size :: proc() -> (int, int) {
@@ -239,35 +237,34 @@ input :: proc(dt: f32) {
 }
 
 draw_border :: proc(x, y, w, h: int, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, fill: bool = false) {
+    if fill {
+        dest := rl.Rectangle {
+            x = f32(x) * char_width * scale,
+            y = f32(y) * char_width * scale,
+            width = f32(w) * char_width * scale,
+            height = f32(h) * char_height * scale,
+        }
+        
+        rl.DrawRectangleRec(dest, bg_color)
+    }
     for i := 0; i < w; i += 1 {
         x := f32(i) * char_width * scale
         upper_pos := rl.Vector2 { x, 0 }
         lower_pos := rl.Vector2 { x, f32(h - 1) * char_height * scale }
         if (i == 0 || i == w - 1) {
-            draw_char('+', upper_pos, scale, bg_color, fg_color)
-            draw_char('+', lower_pos, scale, bg_color, fg_color)
+            draw_char('+', upper_pos, scale, fg_color)
+            draw_char('+', lower_pos, scale, fg_color)
         } else {
-            draw_char('-', upper_pos, scale, bg_color, fg_color)
-            draw_char('-', lower_pos, scale, bg_color, fg_color)
+            draw_char('-', upper_pos, scale, fg_color)
+            draw_char('-', lower_pos, scale, fg_color)
         }
     }
     for i := 1; i < h - 1; i += 1 {
         y := f32(i) * char_height * scale
         left_pos := rl.Vector2 { 0, y }
         right_pos := rl.Vector2 { f32(w - 1) * char_width * scale, y }
-        draw_char('|', left_pos, scale, bg_color, fg_color)
-        draw_char('|', right_pos, scale, bg_color, fg_color)
-    }
-    if fill {
-        for i := 1; i < w - 1; i += 1 {
-            for j := 1; j < h - 1; j += 1 {
-                char_pos := rl.Vector2 {
-                    f32(i) * char_width * scale,
-                    f32(j) * char_height * scale
-                }
-                draw_char(' ', char_pos, scale, bg_color, fg_color)
-            } 
-        }
+        draw_char('|', left_pos, scale, fg_color)
+        draw_char('|', right_pos, scale, fg_color)
     }
 }
 
@@ -386,16 +383,16 @@ main :: proc() {
             }
         }
 
-        first_col := max(0, player.x - grid_cols/2)
-        last_col  := min(player.x + grid_cols/2, WORLD_WIDTH)
-        first_row := max(0, player.y - grid_rows/2)
-        last_row  := min(player.y + grid_rows/2, WORLD_HEIGHT)
+        first_col := max(0, player.x - grid_cols/2) + 1
+        last_col  := min(player.x + (grid_cols+1)/2 - 1, WORLD_WIDTH) 
+        first_row := max(0, player.y - grid_rows/2) + 1
+        last_row  := min(player.y + (grid_rows+1)/2 - 1, WORLD_HEIGHT)
         
         for i := first_col; i < last_col; i += 1 {
             for j := first_row; j < last_row; j += 1 {
                 ch_ore: u8
                 #partial switch world[i][j] {
-                    case .None:     ch_ore = ' '
+                    case .None:     continue
                     case .Iron:     ch_ore = 'I'
                     case .Tungsten: ch_ore = 'T'
                     case .Coal:     ch_ore = 'C'
@@ -408,17 +405,46 @@ main :: proc() {
                 }
 
                 draw_char(ch_ore, pos, scale)
+            }
+        }
+        for i := first_col; i < last_col; i += 1 {
+            for j := first_row; j < last_row; j += 1 {
+                pos := rl.Vector2 {
+                    f32(i - player.x + grid_cols/2) * char_width * scale,
+                    f32(j - player.y + grid_rows/2) * char_height * scale
+                }
+                dest := rl.Rectangle {
+                    x = pos.x,
+                    y = pos.y,
+                    width = char_width * scale,
+                    height = char_height * scale,
+                }
+
                 
+                switch building in buildings[i][j] {
+                    case nil: 
+                    case Conveyor: rl.DrawRectangleRec(dest, rl.DARKGRAY)
+                    case Drill: rl.DrawRectangleRec(dest, BG_COLOR)
+                }
+            }
+        }
+        for i := first_col; i < last_col; i += 1 {
+            for j := first_row; j < last_row; j += 1 {
+                pos := rl.Vector2 {
+                    f32(i - player.x + grid_cols/2) * char_width * scale,
+                    f32(j - player.y + grid_rows/2) * char_height * scale
+                }
+        
                 switch building in buildings[i][j] {
                     case nil: 
                     case Conveyor:
                         switch building.direction {
-                            case .Right: draw_char('>', pos, scale, rl.DARKGRAY)
-                            case .Left:  draw_char('<', pos, scale, rl.DARKGRAY)
-                            case .Down:  draw_char('~'+1, pos, scale, rl.DARKGRAY)
-                            case .Up:    draw_char('~'+2, pos, scale, rl.DARKGRAY)
+                            case .Right: draw_char('>', pos, scale)
+                            case .Left:  draw_char('<', pos, scale)
+                            case .Down:  draw_char('~'+1, pos, scale)
+                            case .Up:    draw_char('~'+2, pos, scale)
                         }
-                    case Drill: draw_char('D', pos, scale, BG_COLOR)
+                    case Drill: draw_char('D', pos, scale, rl.MAGENTA)
                 }
             }
         }
@@ -467,7 +493,7 @@ main :: proc() {
                         case: panic(fmt.aprintf("Unknown ore type: %v", conveyor.ore_type))
                     }
     
-                    draw_char(c, ore_offset, scale * ORE_SCALE)
+                    draw_char(c, ore_offset, scale * ORE_SCALE, rl.GOLD)
                 }
             }
         }
@@ -477,8 +503,9 @@ main :: proc() {
             f32(grid_cols/2) * char_width * scale,
             f32(grid_rows/2) * char_height * scale
         }
-        draw_char('@', player_pos, scale, BG_COLOR)
-
+        rl.DrawRectangleV(player_pos, {char_width, char_height}*scale, BG_COLOR)
+        draw_char('@', player_pos, scale, rl.VIOLET)
+            
         // RAMKA he is right
         draw_border(0, 0, grid_cols, grid_rows, BG_COLOR)
         
@@ -490,8 +517,8 @@ main :: proc() {
             text_building: string
             switch building in buildings[player.x][player.y] {
                 case nil:      text_building = fmt.bprintf(text_buffer[len(text_ore):], "None")
-                case Drill:    text_building = fmt.bprintf(text_buffer[len(text_ore):], "DRILL[%v:%v]", building.ore_type, building.ore_count)
-                case Conveyor: text_building = fmt.bprintf(text_buffer[len(text_ore):], "CONVEYOR_%v[%v]", building.direction, building.ore_type)
+                case Drill:    text_building = fmt.bprintf(text_buffer[len(text_ore):], "Drill[%v:%v]", building.ore_type, building.ore_count)
+                case Conveyor: text_building = fmt.bprintf(text_buffer[len(text_ore):], "Conveyor_%v[%v]", building.direction, building.ore_type)
                 case: panic(fmt.aprintf("Unknown building type %v", building))
             }
 
