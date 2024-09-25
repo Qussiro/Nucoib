@@ -22,7 +22,7 @@ MAX_SCALE            :: f32(20)
 ORE_SCALE            :: f32(0.5)
 ZOOM_COOLDOWN        :: f32(0.0)
 MOVE_COOLDOWN        :: f32(0.05)
-DRILLING_TIME        :: f32(2) 
+DRILLING_TIME        :: f32(0.5) 
 TRANSPORTATION_SPEED :: f32(1)
 BG_COLOR             :: rl.Color {0x20, 0x20, 0x20, 0xFF}
 
@@ -54,9 +54,10 @@ Player :: struct {
 }
 
 Drill :: struct {
-    ores:           queue.Queue(Ore),
+    ores:           [dynamic]Ore,
     capacity:       int,
     drilling_timer: f32,
+    next_tile:      int,
 }
 
 Ore :: struct {
@@ -240,7 +241,7 @@ input :: proc(dt: f32) {
             buildings[player.x+1][player.y+1] = Part{player_pos}
             buildings[player.x][player.y+1] = Part{player_pos}
             
-            buildings[player.x][player.y] = Drill{capacity = 10}
+            buildings[player.x][player.y] = Drill{capacity = 20}
         }
     }
     
@@ -253,16 +254,17 @@ input :: proc(dt: f32) {
         fmt.println("Stood_menu:", stood_menu)
     }
     if rl.IsKeyDown(rl.KeyboardKey.C) {
-        buildings[player.x][player.y] = Conveyor{direction = direction}
+        conveyor, ok := buildings[player.x][player.y].(Conveyor)
+        if (ok && conveyor.direction != direction) || buildings[player.x][player.y] == nil do buildings[player.x][player.y] = Conveyor{direction = direction}
     }
     if rl.IsKeyDown(rl.KeyboardKey.X) {
-        // if _, is_drill := buildings[player.x][player.y].(Drill); is_drill {
-        //     buildings[player.x][player.y] = {}
-        //     buildings[player.x+1][player.y] = {}
-        //     buildings[player.x+1][player.y+1] = {}
-        //     buildings[player.x][player.y+1] = {}
-        // }
-        // else do buildings[player.x][player.y] = {} 
+        if _, is_drill := buildings[player.x][player.y].(Drill); is_drill {
+            buildings[player.x][player.y] = {}
+            buildings[player.x+1][player.y] = {}
+            buildings[player.x+1][player.y+1] = {}
+            buildings[player.x][player.y+1] = {}
+        }
+        else do buildings[player.x][player.y] = {} 
     }
 }
 
@@ -304,7 +306,7 @@ check_boundaries :: proc(pos: [2]int) -> bool {
 
 drill_ore_count :: proc(drill: Drill) -> int {
     count: int = 0
-    for ore in drill.ores.data {
+    for ore in drill.ores {
         count += ore.count
     }
     return count
@@ -371,18 +373,24 @@ main :: proc() {
                 switch &building in buildings[i][j] {
                     case nil:
                     case Drill: 
-                        if world[i][j] == .None do continue
-
+                        
+                        next_ore := world[i + building.next_tile % 2][j + building.next_tile / 2]
+                        
                         if building.drilling_timer >= DRILLING_TIME {
                             if drill_ore_count(building) < building.capacity {
-                                if queue.len(building.ores) != 0 && queue.back(&building.ores).type == world[i][j] {
-                                    queue.back_ptr(&building.ores).count += 1
-                                } else do queue.append(&building.ores, Ore{world[i][j], 1})
+                                if next_ore != .None {
+                                    if len(building.ores) != 0 && building.ores[len(building.ores)-1].type == next_ore {
+                                        building.ores[len(building.ores)-1].count += 1
+                                    } else {
+                                        append(&building.ores, Ore{next_ore, 1})
+                                    } 
+                                } 
+                                building.next_tile = (building.next_tile + 1) % 4
                             } 
                             building.drilling_timer = 0
                         }
                         building.drilling_timer += dt
-
+                        
                         
                         for direction in Direction{
                             next_pos := [2]int{i, j} + offsets[direction]
@@ -391,10 +399,11 @@ main :: proc() {
                                 conveyor, is_conveyor := &buildings[next_pos.x][next_pos.y].(Conveyor)
                                 if is_conveyor && conveyor.ore_type == .None && drill_ore_count(building) > 0 {
                                     if conveyor.direction in perpendiculars[direction] do conveyor.transportation_progress = 0.7
-                                    
-                                    queue.front_ptr(&building.ores).count -= 1
-                                    conveyor.ore_type = queue.front_ptr(&building.ores).type
-                                    if queue.front_ptr(&building.ores).count <= 0 do queue.pop_front(&building.ores) 
+
+                                    conveyor.ore_type = building.ores[0].type
+                                    building.ores[0].count -= 1
+                                    fmt.println(building.ores)
+                                    if building.ores[0].count <= 0 do ordered_remove(&building.ores, 0) 
                                 }
                             }
                         }
@@ -468,7 +477,15 @@ main :: proc() {
                 switch building in buildings[i][j] {
                     case nil: 
                     case Conveyor: rl.DrawRectangleRec(dest, rl.DARKGRAY)
-                    case Drill: rl.DrawRectangleRec(dest, BG_COLOR)
+                    case Drill: 
+                        dest := rl.Rectangle {
+                            x = pos.x,
+                            y = pos.y,
+                            width = char_width * scale * 2,
+                            height = char_height * scale * 2,
+                        }
+                        
+                        rl.DrawRectangleRec(dest, BG_COLOR)
                     case Part:
                 }
             }
@@ -563,9 +580,22 @@ main :: proc() {
             text_building: string
             switch building in buildings[player.x][player.y] {
                 case nil:      text_building = fmt.bprintf(text_buffer[len(text_ore):], "None")
-                case Drill:    text_building = fmt.bprintf(text_buffer[len(text_ore):], "Drill[%v]", building.ores.data)
+                case Drill:    
+                    if len(building.ores) == 0 {
+                        text_building = fmt.bprintf(text_buffer[len(text_ore):], "Drill[%v:%v]", nil, nil)
+                    } else {
+                        text_building = fmt.bprintf(text_buffer[len(text_ore):], "Drill[%v:%v]", building.ores[0].type,building.ores[0].count)
+                    }
+                    
+                case Part:     
+                    drill := buildings[building.main_pos.x][building.main_pos.y].(Drill)
+                    
+                    if len(drill.ores) == 0 {
+                        text_building = fmt.bprintf(text_buffer[len(text_ore):], "Drill[%v:%v]", nil, nil)
+                    } else {
+                        text_building = fmt.bprintf(text_buffer[len(text_ore):], "Drill[%v:%v]", drill.ores[0].type, drill.ores[0].count)
+                    }
                 case Conveyor: text_building = fmt.bprintf(text_buffer[len(text_ore):], "Conveyor_%v[%v]", building.direction, building.ore_type)
-                case Part:
                 case: panic(fmt.aprintf("Unknown building type %v", building))
             }
 
@@ -580,3 +610,4 @@ main :: proc() {
         rl.EndDrawing()
     }    
 }
+    
