@@ -195,7 +195,6 @@ draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, fg_color: rl.Color = rl.WH
         width = s.char_width * scale,
         height = s.char_height * scale,
     }
-    // rl.DrawRectanglePro(dest, origin, rotation, bg_color)
     rl.DrawTexturePro(s.font_texture, source, dest, {}, 0, fg_color) 
 }
 
@@ -256,11 +255,9 @@ input :: proc(dt: f32) {
     
     if rl.IsKeyPressed(rl.KeyboardKey.R) {
         s.direction = Direction((i32(s.direction) + 1) % (i32(max(Direction)) + 1))
-        fmt.println(s.direction)
     }
     if rl.IsKeyPressed(rl.KeyboardKey.GRAVE) {
         s.stood_menu = !s.stood_menu
-        fmt.println("Stood_menu:", s.stood_menu)
     }
     if rl.IsKeyDown(rl.KeyboardKey.C) {
         conveyor, ok := s.buildings[s.player.x][s.player.y].(Conveyor)
@@ -340,7 +337,6 @@ main :: proc() {
     
     fmt.println("Map size: ", size_of(World) + size_of(Buildings), "Bytes")
     
-    // font_texture = rl.LoadTexture("./charmap-oldschool_white12.png")
     s.font_texture = rl.LoadTexture("./output.png")
     s.char_width = f32(int(s.font_texture.width) / ATLAS_COLS);
     s.char_height = f32(int(s.font_texture.height) / ATLAS_ROWS);
@@ -355,9 +351,6 @@ main :: proc() {
         tile := OreTile(rand.int31_max(max_tile))
         cluster_generation(tile)
     }
-    // for v,i in count_clusters_sizes {
-    //     fmt.println(i, ":", v)
-    // }
     
     offsets := OFFSETS
     opposite := OPPOSITE
@@ -382,7 +375,6 @@ main :: proc() {
                 switch &building in s.buildings[i][j] {
                     case nil:
                     case Drill: 
-                        
                         next_ore := s.world[i + building.next_tile % 2][j + building.next_tile / 2]
                         
                         if building.drilling_timer >= DRILLING_TIME {
@@ -416,7 +408,6 @@ main :: proc() {
                                 next_pos[1] += offsets[building.direction] + {1, 0} 
                         }
                         for pos in next_pos {
-                            fmt.println(pos)
                             if check_boundaries(pos) {
                                 conveyor, is_conveyor := &s.buildings[pos.x][pos.y].(Conveyor)
                                 if is_conveyor && conveyor.ore_type == .None && drill_ore_count(building) > 0 {
@@ -424,7 +415,6 @@ main :: proc() {
 
                                     conveyor.ore_type = building.ores[0].type
                                     building.ores[0].count -= 1
-                                    fmt.println(building.ores)
                                     if building.ores[0].count <= 0 do ordered_remove(&building.ores, 0) 
                                 }
                             }
