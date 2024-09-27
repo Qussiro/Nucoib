@@ -97,6 +97,11 @@ Direction :: enum {
    Up, 
 }
 
+Item :: struct {
+    pos: rl.Vector2,
+    ore: OreTile,
+}
+
 State :: struct {
     world:                ^World,
     buildings:            ^Buildings,
@@ -115,6 +120,7 @@ State :: struct {
     window_height:        i32,
     scale:                f32,
     direction:            Direction,
+    items:                [dynamic]Item,
 }
 
 s := State {
@@ -407,46 +413,53 @@ main :: proc() {
                                 next_pos[0] += offsets[building.direction] 
                                 next_pos[1] += offsets[building.direction] + {1, 0} 
                         }
-                        for pos in next_pos {
-                            if check_boundaries(pos) {
-                                conveyor, is_conveyor := &s.buildings[pos.x][pos.y].(Conveyor)
-                                if is_conveyor && conveyor.ore_type == .None && drill_ore_count(building) > 0 {
-                                    if conveyor.direction in perpendiculars[building.direction] do conveyor.transportation_progress = 0.7
-
-                                    conveyor.ore_type = building.ores[0].type
-                                    building.ores[0].count -= 1
-                                    if building.ores[0].count <= 0 do ordered_remove(&building.ores, 0) 
+                        skip: for pos in next_pos {
+                            world_pos := rl.Vector2 {f32(pos.x), f32(pos.y)} + 0.5
+                            
+                            if drill_ore_count(building) > 0 {
+                                for item in s.items {
+                                    if rl.Vector2Length(item.pos - world_pos) < 2 * ORE_SCALE {
+                                        continue skip
+                                    }  
                                 }
+                                building.ores[0].count -= 1
+                                fmt.println(len(s.items))
+                                
+                                append(&s.items, Item{world_pos, building.ores[0].type}) 
+                                if building.ores[0].count <= 0 do ordered_remove(&building.ores, 0) 
                             }
                         }
                     case Conveyor:
-                        if building.ore_type == .None do continue
-                        
-                        building.transportation_progress += dt * TRANSPORTATION_SPEED
-                        next_pos := [2]int{i, j} + offsets[building.direction]
-                        max_progress: f32 = 1
-                        
-                        if check_boundaries(next_pos) { 
-                            conveyor, is_conveyor := &s.buildings[next_pos.x][next_pos.y].(Conveyor)
-                            if is_conveyor && conveyor.ore_type == .None && conveyor.direction != opposite[building.direction] {
-                                match_perpendicular := conveyor.direction in perpendiculars[building.direction] 
-                                
-                                if match_perpendicular do max_progress = 1.7
-                                
-                                if building.transportation_progress >= max_progress {
-                                    conveyor.ore_type = building.ore_type
-                                    building.ore_type = .None
-                                    building.transportation_progress = 0
-                                
-                                    if match_perpendicular do conveyor.transportation_progress = 0.7
-                                }
-                            }
-                        }
-                        building.transportation_progress = min(building.transportation_progress, max_progress)
                     case Part:
                 }
             }
         }
+        for &item in s.items {
+            cell_pos := [2]int{int(item.pos.x), int(item.pos.y)}
+
+            conveyor, is_conveyor := s.buildings[cell_pos.x][cell_pos.y].(Conveyor)
+            if is_conveyor {
+                switch conveyor.direction {
+                    case .Right:
+                        item.pos += {1, f32(cell_pos.y)+0.5-item.pos.y} * dt * TRANSPORTATION_SPEED * {1, 3.5}
+                    case .Left:
+                        item.pos += {-1, f32(cell_pos.y)+0.5-item.pos.y} * dt * TRANSPORTATION_SPEED * {1, 3.5}
+                    case .Down:
+                        item.pos += {f32(cell_pos.x)+0.5-item.pos.x, 1} * dt * TRANSPORTATION_SPEED * {3.5, 1}
+                    case .Up:
+                        item.pos += {f32(cell_pos.x)+0.5-item.pos.x, -1} * dt * TRANSPORTATION_SPEED * {3.5, 1}
+                }
+            }
+        }
+
+        for &i_item in s.items {
+            for j_item in s.items {
+                if rl.Vector2Length(i_item.pos - j_item.pos) < 2 * ORE_SCALE {
+                    l := rl.Vector2Length(i_item.pos - j_item.pos) - 2 * ORE_SCALE
+                    i_item.pos -= rl.Vector2Normalize(i_item.pos - j_item.pos) * l
+                }  
+            }
+        } 
 
         first_col := max(0, s.player.x - s.grid_cols/2) + 1
         last_col  := min(s.player.x + (s.grid_cols+1)/2 - 1, WORLD_WIDTH) 
@@ -532,55 +545,26 @@ main :: proc() {
             }
         }
         
-        for i := first_col; i < last_col; i += 1 {
-            for j := first_row; j < last_row; j += 1 {
-                conveyor, is_conveyor := &s.buildings[i][j].(Conveyor)
-                if is_conveyor && conveyor.ore_type != .None {
-                    pos := rl.Vector2 {
-                        f32(i - s.player.x + s.grid_cols/2) * s.char_width * s.scale,
-                        f32(j - s.player.y + s.grid_rows/2) * s.char_height * s.scale
-                    }
-                    
-                    ore_offset: rl.Vector2
-
-                    // MAGIC STUFF, DON`T TOUCH
-                    switch conveyor.direction {
-                        case .Right:
-                            ore_offset =  {
-                                s.char_width * s.scale * (conveyor.transportation_progress - ORE_SCALE), 
-                                s.char_height * s.scale * (0.5 - 0.5*ORE_SCALE)
-                            }
-                        case .Down:
-                            ore_offset =  {
-                                s.char_width * s.scale * (0.5 - 0.5*ORE_SCALE),
-                                s.char_height * s.scale * (conveyor.transportation_progress - ORE_SCALE)
-                            } 
-                        case .Left: 
-                            ore_offset = rl.Vector2 {
-                                s.char_width * s.scale * (1 - conveyor.transportation_progress), 
-                                s.char_height * s.scale * (0.5 - 0.5*ORE_SCALE)
-                            }
-                        case .Up:
-                            ore_offset =  {
-                                s.char_width * s.scale * (0.5 - 0.5*ORE_SCALE),
-                                s.char_height * s.scale * (1 - conveyor.transportation_progress) 
-                            } 
-                    }
-
-                    ore_offset += pos
-                    c: u8
-                    #partial switch conveyor.ore_type {
-                        case .Iron:     c = 'I'
-                        case .Tungsten: c = 'T'
-                        case .Coal:     c = 'C'
-                        case: panic(fmt.aprintf("Unknown ore type: %v", conveyor.ore_type))
-                    }
-    
-                    draw_char(c, ore_offset, s.scale * ORE_SCALE, rl.GOLD)
-                }
+        for item in s.items {
+            i_pos := rl.Vector2{
+                s.scale*s.char_width*(item.pos.x - f32(s.player.x) + f32(s.grid_cols/2) + 0.5 * ORE_SCALE - 0.5),
+                s.scale*s.char_height*(item.pos.y - f32(s.player.y) + f32(s.grid_rows/2) + 0.5 * ORE_SCALE - 0.5),
             }
+            switch item.ore {
+                case .Iron: draw_char('I', i_pos, s.scale * ORE_SCALE, rl.GOLD)
+                case .Tungsten: draw_char('T', i_pos, s.scale * ORE_SCALE, rl.GOLD)
+                case .Coal: draw_char('C', i_pos, s.scale * ORE_SCALE, rl.GOLD)
+                case .None: 
+            }
+            
+            circle_pos := rl.Vector2{
+                s.scale*s.char_width*(item.pos.x - f32(s.player.x) + f32(s.grid_cols/2)),
+                s.scale*s.char_height*(item.pos.y - f32(s.player.y) + f32(s.grid_rows/2)),
+            }            
+            rl.DrawCircleLinesV(circle_pos, s.scale*ORE_SCALE*s.char_width, rl.RED)
         }
 
+        
         // PLAYER
         player_pos := rl.Vector2 {
             f32(s.grid_cols/2) * s.char_width * s.scale,
