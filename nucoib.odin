@@ -52,6 +52,7 @@ Player :: struct {
     pos: [2]int,
 }
 
+
 Drill :: struct {
     ores:           [dynamic]Ore,
     capacity:       int,
@@ -94,6 +95,12 @@ OreTile :: enum u8 {
     Coal,
 }
 
+Fill :: enum {
+    None,
+    All,
+    Partial,
+}
+
 Direction :: enum {
    Right,
    Down,
@@ -104,6 +111,7 @@ Direction :: enum {
 State :: struct {
     world:                ^World,
     buildings:            ^Buildings,
+    base:                 ^Base, 
     player:               Player,
     font_texture:         rl.Texture2D,
     char_width:           f32,
@@ -115,6 +123,7 @@ State :: struct {
     stood_menu:           bool,
     count_clusters_sizes: [CLUSTER_SIZE + 1]int,
     text_buffer:          [512]u8,
+    text_buffer_length:   int,
     window_width:         i32,
     window_height:        i32,
     scale:                f32,
@@ -272,15 +281,50 @@ input :: proc(dt: f32) {
     }
 }
 
-draw_border :: proc(x, y, w, h: int, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, fill: bool = false) {
-    if fill {
+draw_border :: proc(x, y, w, h: int, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, fill: Fill = .None) {
+    if fill == .All {
         dest := rl.Rectangle {
             x = f32(x) * s.char_width * s.scale,
-            y = f32(y) * s.char_width * s.scale,
+            y = f32(y) * s.char_height * s.scale,
             width = f32(w) * s.char_width * s.scale,
             height = f32(h) * s.char_height * s.scale,
         }
         
+        rl.DrawRectangleRec(dest, bg_color)
+    }
+    if fill == .Partial {
+        dest := rl.Rectangle {
+            x = f32(x) * s.char_width * s.scale,
+            y = f32(y) * s.char_height * s.scale,
+            width = f32(w) * s.char_width * s.scale,
+            height = s.char_height * s.scale,
+        }
+
+        rl.DrawRectangleRec(dest, bg_color)
+        
+        dest = rl.Rectangle {
+            x = f32(x) * s.char_width * s.scale,
+            y = f32(y) * s.char_height * s.scale,
+            width = s.char_width * s.scale,
+            height = f32(h) * s.char_height * s.scale,
+        }
+
+        rl.DrawRectangleRec(dest, bg_color)
+        dest = rl.Rectangle {
+            x = (f32(x) + f32(w) - 1) * s.char_width * s.scale,
+            y = f32(y) * s.char_height * s.scale,
+            width = s.char_width * s.scale,
+            height = f32(h) * s.char_height * s.scale,
+        }
+
+        rl.DrawRectangleRec(dest, bg_color)
+        dest = rl.Rectangle {
+            x = f32(x) * s.char_width * s.scale,
+            y = (f32(y) + f32(h) - 1)* s.char_height * s.scale,
+            width = f32(w) * s.char_width * s.scale,
+            height = s.char_height * s.scale,
+        }
+
         rl.DrawRectangleRec(dest, bg_color)
     }
     for i := x; i < w + x; i += 1 {
@@ -316,23 +360,23 @@ drill_ore_count :: proc(drill: Drill) -> int {
     return count
 }
 
-string_building :: proc(building: BuildingTile, text_ore: string) -> string {
+string_building :: proc(building: BuildingTile) -> string {
     switch building in building {
         case nil:      
-            return fmt.bprintf(s.text_buffer[len(text_ore):], "None")
+            return text_buffer("None")
         case Drill:    
             if len(building.ores) == 0 {
-                return fmt.bprintf(s.text_buffer[len(text_ore):], "Drill[%v:%v]", nil, nil)
+                return text_buffer("Drill[%v:%v]", nil, nil)
             } else {
-                return fmt.bprintf(s.text_buffer[len(text_ore):], "Drill[%v:%v]", building.ores[0].type,building.ores[0].count)
+                return text_buffer("Drill[%v:%v]", building.ores[0].type,building.ores[0].count)
             }
         
         case Part:   
-            return string_building(s.buildings[building.main_pos.x][building.main_pos.y], text_ore)  
+            return string_building(s.buildings[building.main_pos.x][building.main_pos.y])  
         case Conveyor: 
-            return fmt.bprintf(s.text_buffer[len(text_ore):], "Conveyor_%v[%v]", building.direction, building.ore_type)
+            return text_buffer("Conveyor_%v[%v]", building.direction, building.ore_type)
         case Base: 
-            return fmt.bprintf(s.text_buffer[len(text_ore):], "BASE: %v", building)
+            return text_buffer("BASE: %v", building)
         case: panic(fmt.aprintf("Unknown building type %v", building))
     }
 }
@@ -350,7 +394,19 @@ delete_building :: proc(pos: [2]int) {
         case Conveyor:
             s.buildings[pos.x][pos.y] = {}
     }
-} 
+}
+
+clear_text_buffer :: proc() {
+    s.text_buffer_length = 0
+}
+
+text_buffer :: proc(str: string, args: ..any) -> string{
+    result := fmt.bprintf(s.text_buffer[s.text_buffer_length:], str, ..args)
+
+    assert (len(result) > 0)
+    s.text_buffer_length += len(result)
+    return result
+}
 
 main :: proc() {
     rl.InitWindow(s.window_width, s.window_height, "nucoib")
@@ -394,6 +450,8 @@ main :: proc() {
             s.buildings[i][j] = Part{{WORLD_WIDTH / 2 - 1, WORLD_HEIGHT / 2 - 1}}
         }
     } 
+
+    s.base = &s.buildings[WORLD_WIDTH / 2 - 1][WORLD_HEIGHT / 2 - 1].(Base)
 
     offsets := OFFSETS
     opposite := OPPOSITE
@@ -605,7 +663,7 @@ main :: proc() {
                         
                     case Part:
                     case Base:
-                        draw_char('M', pos, 3 * s.scale, rl.MAGENTA)
+                        draw_char('M', pos, 3 * s.scale, rl.BEIGE)
                 }
             }
         }
@@ -669,30 +727,55 @@ main :: proc() {
         draw_char('@', player_pos, s.scale, rl.VIOLET)
             
         // RAMKA he is right
-        draw_border(0, 0, s.grid_cols, s.grid_rows, BG_COLOR)
-        draw_border(s.grid_cols-3, 0, 3, 3, BG_COLOR, fill = true)
+        draw_border(0, 0, s.grid_cols, s.grid_rows, BG_COLOR, fill = .Partial)
+
+        // Direction menu 
+        draw_border(s.grid_cols-3, s.grid_rows-3, 3, 3, BG_COLOR, fill = .All)
         switch s.direction {
-            case .Right: draw_char('>',   {s.char_width*f32(s.grid_cols-2), s.char_height*1} * s.scale, s.scale, rl.SKYBLUE)
-            case .Left:  draw_char('<',   {s.char_width*f32(s.grid_cols-2), s.char_height*1} * s.scale, s.scale, rl.SKYBLUE)
-            case .Down:  draw_char('~'+1, {s.char_width*f32(s.grid_cols-2), s.char_height*1} * s.scale, s.scale, rl.SKYBLUE)
-            case .Up:    draw_char('~'+2, {s.char_width*f32(s.grid_cols-2), s.char_height*1} * s.scale, s.scale, rl.SKYBLUE)
+            case .Right: draw_char('>',   {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
+            case .Left:  draw_char('<',   {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
+            case .Down:  draw_char('~'+1, {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
+            case .Up:    draw_char('~'+2, {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
+        }
+
+        clear_text_buffer()
+        // Ores menu
+        str_arr: [OreTile]string 
+        for ore_tile in OreTile {
+            str_arr[ore_tile] = text_buffer("%v: %v", ore_tile, s.base.ores[ore_tile])
+        }
+        str_length: int
+        for str in str_arr {
+            if len(str) > str_length do str_length = len(str)
+        }
+      
+        draw_border(s.grid_cols-str_length-2, 0, str_length+2, int(max(OreTile))+3, BG_COLOR, fill = .All)
+        for str, i in str_arr {
+            draw_text(str, ({f32(s.grid_cols-str_length-1) * s.char_width, s.char_height*f32(int(i)+1)}) * s.scale, s.scale)
         }
         
+        // Stood menu
         if s.grid_rows > STOOD_MENU_HEIGHT && s.grid_cols > STOOD_MENU_WIDTH && s.stood_menu {
             // Ore text
-            text_ore := fmt.bprintf(s.text_buffer[:], "%v", s.world[s.player.pos.x][s.player.pos.y])
+            text_ore := text_buffer("%v", s.world[s.player.pos.x][s.player.pos.y])
 
-    // Building text
-            text_building := string_building(s.buildings[s.player.pos.x][s.player.pos.y], text_ore) 
+            // Building text
+            text_building := string_building(s.buildings[s.player.pos.x][s.player.pos.y]) 
 
             border_w := max(len(text_building) + 2, STOOD_MENU_WIDTH)
-            draw_border(0, 0, border_w, STOOD_MENU_HEIGHT, BG_COLOR, fill = true)
+            draw_border(0, 0, border_w, STOOD_MENU_HEIGHT, BG_COLOR, fill = .All)
             draw_text("STOOD ON:",   {s.char_width, s.char_height*1} * s.scale, s.scale)
             draw_text(text_ore,      {s.char_width, s.char_height*2} * s.scale, s.scale)
             draw_text(text_building, {s.char_width, s.char_height*3} * s.scale, s.scale)
+
+            fmt.println(text_ore, len(text_ore))
         }
+
+        // DrawFPS
+        fps_text := rl.GetFPS()
+        draw_border(0, s.grid_rows-3, 4, 3, BG_COLOR, fill = .All)
+        draw_text(text_buffer("%v", fps_text), {1, f32(s.grid_rows)-2}*{s.char_width, s.char_height}*s.scale, s.scale )
         
-        rl.DrawFPS(14, 14)
         rl.EndDrawing()
     }    
 }
