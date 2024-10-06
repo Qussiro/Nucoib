@@ -29,8 +29,10 @@ MOVE_COOLDOWN          :: f32(0.05)
 DRILLING_TIME          :: f32(0.5) 
 TRANSPORTATION_SPEED   :: f32(1)
 BG_COLOR               :: rl.Color {0x20, 0x20, 0x20, 0xFF}
+MAX_ORE_COUNT          :: 1000
+MIN_ORE_COUNT          :: 100
 
-World     :: [WORLD_WIDTH][WORLD_HEIGHT]OreTile
+World     :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
 Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]BuildingTile
 
 Player :: struct { 
@@ -54,20 +56,20 @@ Drill :: struct {
 
 Conveyor :: struct {
     direction:               Direction,
-    ore_type:                OreTile,
+    ore_type:                OreType,
     capacity:                int,
     transportation_progress: f32,
 }
 
 Base :: struct {
-    ores: [OreTile]int,
+    ores: [OreType]int,
 }
 
 Part :: struct {
     main_pos: [2]int
 }
 
-OreTile :: enum u8 {
+OreType :: enum u8 {
     None,
     Iron,
     Tungsten,
@@ -75,7 +77,7 @@ OreTile :: enum u8 {
 }
 
 Ore :: struct {
-    type:  OreTile,
+    type:  OreType,
     count: int,
 }
 
@@ -144,13 +146,13 @@ opposite := [Direction]Direction {
     .Up    = .Down,
 }
 
-cluster_generation :: proc(tile: OreTile) {
-    Point :: [2]i32
+cluster_generation :: proc(tile: OreType) {
+    Point :: [2]int
     
     count_useless := 0
     count_usefull := 0
-    cx := rand.int31_max(WORLD_WIDTH)
-    cy := rand.int31_max(WORLD_HEIGHT)
+    cx := rand.int_max(WORLD_WIDTH)
+    cy := rand.int_max(WORLD_HEIGHT)
 
     tovisit: queue.Queue(Point)
     visited: [dynamic]Point
@@ -183,7 +185,11 @@ cluster_generation :: proc(tile: OreTile) {
         if ci.y + 1 != WORLD_HEIGHT {
             queue.push_back(&tovisit, Point{ci.x, ci.y+1})
         }
-        s.world[ci.x][ci.y] = tile
+        min := int(y * MIN_ORE_COUNT)
+        max := int(y * MAX_ORE_COUNT)
+        count := rand.int_max(max - min) + min
+        
+        s.world[ci.x][ci.y] = {tile, count}
         count_usefull += 1
     }
     
@@ -278,21 +284,26 @@ update :: proc(dt: f32) {
             switch &building in s.buildings[i][j] {
                 case nil:
                 case Drill: 
-                    next_ore := s.world[i + building.next_tile % 2][j + building.next_tile / 2]
+                    next_ore := &s.world[i + building.next_tile % 2][j + building.next_tile / 2]
                     
                     if building.drilling_timer >= DRILLING_TIME {
                         if drill_ore_count(building) < building.capacity {
-                            if next_ore != .None {
-                                if len(building.ores) != 0 && building.ores[len(building.ores)-1].type == next_ore {
+                            if next_ore.type != .None {
+                                if len(building.ores) != 0 && building.ores[len(building.ores)-1].type == next_ore.type {
                                     building.ores[len(building.ores)-1].count += 1
                                 } else {
-                                    append(&building.ores, Ore{next_ore, 1})
-                                } 
+                                    append(&building.ores, Ore{next_ore.type, 1})
+                                }
+                                
+                                next_ore.count -= 1
+                                if next_ore.count <= 0 {
+                                    next_ore^ = {}
+                                }
                             } 
                             building.next_tile = (building.next_tile + 1) % 4
                         } 
                         building.drilling_timer = 0
-                    }
+                   }
                     building.drilling_timer += dt
                     
                     next_pos := [2][2]int{{i,j},{i,j}}
@@ -430,7 +441,7 @@ draw :: proc() {
     for i := first_col; i < last_col; i += 1 {
         for j := first_row; j < last_row; j += 1 {
             ch_ore: u8
-            #partial switch s.world[i][j] {
+            #partial switch s.world[i][j].type {
                 case .None:     continue
                 case .Iron:     ch_ore = 'I'
                 case .Tungsten: ch_ore = 'T'
@@ -599,8 +610,8 @@ draw :: proc() {
     clear_text_buffer()
     
     // Base menu
-    str_arr: [OreTile]string 
-    for ore_tile in OreTile {
+    str_arr: [OreType]string 
+    for ore_tile in OreType {
         str_arr[ore_tile] = text_buffer("%v: %v", ore_tile, s.base.ores[ore_tile])
     }
     str_length: int
@@ -609,7 +620,7 @@ draw :: proc() {
     }
 
     base_menu_width := str_length+2
-    base_menu_height := int(max(OreTile))+3
+    base_menu_height := int(max(OreType))+3
     
     if s.grid_cols > base_menu_width && s.grid_rows > base_menu_height && s.base_menu {
         draw_border(s.grid_cols-base_menu_width, 0, base_menu_width, base_menu_height, BG_COLOR, fill = .All)
@@ -625,7 +636,15 @@ draw :: proc() {
     // Stood menu
     text_stood_menu := "STOOD ON:"
     text_building := string_building(s.buildings[s.player.pos.x][s.player.pos.y]) 
-    text_ore := text_buffer("%v", s.world[s.player.pos.x][s.player.pos.y])
+
+    text_ore: string
+    ore := &s.world[s.player.pos.x][s.player.pos.y]
+    #partial switch ore.type {
+        case .None:
+            text_ore = text_buffer("None")
+        case: 
+            text_ore = text_buffer("%v: %v", ore.type, ore.count)
+    }
     stood_menu_width := max(len(text_stood_menu), len(text_building), len(text_ore))+2
     
     if s.grid_rows > STOOD_MENU_HEIGHT && s.grid_cols > stood_menu_width && s.stood_menu {
@@ -788,8 +807,8 @@ main :: proc() {
     s.player.pos.y = WORLD_HEIGHT / 2
     
     for i in 0..<CLUSTER_COUNT {
-        max_tile := i32(max(OreTile)) + 1
-        tile := OreTile(rand.int31_max(max_tile))
+        max_tile := i32(max(OreType)) + 1
+        tile := OreType(rand.int31_max(max_tile))
         cluster_generation(tile)
     }
 
