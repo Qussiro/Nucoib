@@ -10,22 +10,25 @@ import "core:io"
 import "base:runtime"
 import rl "vendor:raylib"
 
-ATLAS_COLS           :: 18
-ATLAS_ROWS           :: 7
-STOOD_MENU_HEIGHT    :: 5
-STOOD_MENU_WIDTH     :: 17
-WORLD_WIDTH          :: 1000
-WORLD_HEIGHT         :: 1000
-CLUSTER_SIZE         :: 100
-CLUSTER_COUNT        :: 10000
-MIN_SCALE            :: f32(1)
-MAX_SCALE            :: f32(20)
-ORE_SCALE            :: f32(0.5)
-ZOOM_COOLDOWN        :: f32(0.0)
-MOVE_COOLDOWN        :: f32(0.05)
-DRILLING_TIME        :: f32(0.5) 
-TRANSPORTATION_SPEED :: f32(1)
-BG_COLOR             :: rl.Color {0x20, 0x20, 0x20, 0xFF}
+ATLAS_COLS             :: 18
+ATLAS_ROWS             :: 7
+STOOD_MENU_HEIGHT      :: 5
+DIRECTION_MENU_HEIGHT  :: 3
+DIRECTION_MENU_WIDTH   :: 3
+FPS_MENU_HEIGHT        :: 3
+FPS_MENU_WIDTH         :: 4
+WORLD_WIDTH            :: 1000
+WORLD_HEIGHT           :: 1000
+CLUSTER_SIZE           :: 100
+CLUSTER_COUNT          :: 10000
+MIN_SCALE              :: f32(1)
+MAX_SCALE              :: f32(20)
+ORE_SCALE              :: f32(0.5)
+ZOOM_COOLDOWN          :: f32(0.0)
+MOVE_COOLDOWN          :: f32(0.05)
+DRILLING_TIME          :: f32(0.5) 
+TRANSPORTATION_SPEED   :: f32(1)
+BG_COLOR               :: rl.Color {0x20, 0x20, 0x20, 0xFF}
 
 OFFSETS :: [Direction][2]int {
     .Right = {1, 0},
@@ -122,6 +125,8 @@ State :: struct {
     pressed_move:         f32,
     pressed_zoom:         f32,
     stood_menu:           bool,
+    base_menu:            bool,
+    fps_menu:             bool,
     count_clusters_sizes: [CLUSTER_SIZE + 1]int,
     text_buffer:          [512]u8,
     text_buffer_length:   int,
@@ -273,6 +278,12 @@ input :: proc(dt: f32) {
     if rl.IsKeyPressed(rl.KeyboardKey.GRAVE) {
         s.stood_menu = !s.stood_menu
     }
+    if rl.IsKeyPressed(rl.KeyboardKey.I) {
+        s.base_menu = !s.base_menu
+    }
+    if rl.IsKeyPressed(rl.KeyboardKey.F1) {
+        s.fps_menu = !s.fps_menu
+    }
     if rl.IsKeyDown(rl.KeyboardKey.C) {
         conveyor, ok := s.buildings[s.player.pos.x][s.player.pos.y].(Conveyor)
         if (ok && conveyor.direction != s.direction) || s.buildings[s.player.pos.x][s.player.pos.y] == nil do s.buildings[s.player.pos.x][s.player.pos.y] = Conveyor{direction = s.direction}
@@ -423,7 +434,7 @@ text_buffer_stream_proc :: proc(stream_data: rawptr, mode: io.Stream_Mode, p: []
 main :: proc() {
     rl.InitWindow(s.window_width, s.window_height, "nucoib")
     rl.SetWindowState({.WINDOW_RESIZABLE})
-    rl.SetTargetFPS(60)
+    // rl.SetTargetFPS(60)
     
     err: runtime.Allocator_Error
     s.world, err = new(World)
@@ -439,7 +450,7 @@ main :: proc() {
     
     fmt.println("Map size: ", size_of(World) + size_of(Buildings), "Bytes")
     
-    s.font_texture = rl.LoadTexture("./output.png")
+    s.font_texture = rl.LoadTexture("./atlas.png")
     s.char_width = f32(int(s.font_texture.width) / ATLAS_COLS)
     s.char_height = f32(int(s.font_texture.height) / ATLAS_ROWS)
     
@@ -742,16 +753,20 @@ main :: proc() {
         draw_border(0, 0, s.grid_cols, s.grid_rows, BG_COLOR, fill = .Partial)
 
         // Direction menu 
-        draw_border(s.grid_cols-3, s.grid_rows-3, 3, 3, BG_COLOR, fill = .All)
-        switch s.direction {
-            case .Right: draw_char('>',   {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
-            case .Left:  draw_char('<',   {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
-            case .Down:  draw_char('~'+1, {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
-            case .Up:    draw_char('~'+2, {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
+        if s.grid_cols > DIRECTION_MENU_WIDTH && s.grid_rows > DIRECTION_MENU_HEIGHT {
+            draw_border(s.grid_cols-DIRECTION_MENU_HEIGHT, s.grid_rows-DIRECTION_MENU_HEIGHT, DIRECTION_MENU_WIDTH, DIRECTION_MENU_HEIGHT, BG_COLOR, fill = .All)
+        
+            switch s.direction {
+                case .Right: draw_char('>',   {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
+                case .Left:  draw_char('<',   {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
+                case .Down:  draw_char('~'+1, {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
+                case .Up:    draw_char('~'+2, {s.char_width*f32(s.grid_cols-2), s.char_height*f32(s.grid_rows-2)} * s.scale, s.scale, rl.SKYBLUE)
+            }
         }
-
+        
         clear_text_buffer()
-        // Ores menu
+        
+        // Base menu
         str_arr: [OreTile]string 
         for ore_tile in OreTile {
             str_arr[ore_tile] = text_buffer("%v: %v", ore_tile, s.base.ores[ore_tile])
@@ -760,31 +775,38 @@ main :: proc() {
         for str in str_arr {
             if len(str) > str_length do str_length = len(str)
         }
-      
-        draw_border(s.grid_cols-str_length-2, 0, str_length+2, int(max(OreTile))+3, BG_COLOR, fill = .All)
-        for str, i in str_arr {
-            draw_text(str, ({f32(s.grid_cols-str_length-1) * s.char_width, s.char_height*f32(int(i)+1)}) * s.scale, s.scale)
+
+        base_menu_width := str_length+2
+        base_menu_height := int(max(OreTile))+3
+        
+        if s.grid_cols > base_menu_width && s.grid_rows > base_menu_height && s.base_menu {
+            draw_border(s.grid_cols-base_menu_width, 0, base_menu_width, base_menu_height, BG_COLOR, fill = .All)
+            for str, i in str_arr {
+                draw_text(str, ({f32(s.grid_cols-str_length-1) * s.char_width, s.char_height*f32(int(i)+1)}) * s.scale, s.scale)
+            }
         }
         
         // Stood menu
-        if s.grid_rows > STOOD_MENU_HEIGHT && s.grid_cols > STOOD_MENU_WIDTH && s.stood_menu {
+        text_stood_menu := "STOOD ON:"
+        text_building := string_building(s.buildings[s.player.pos.x][s.player.pos.y]) 
+        text_ore := text_buffer("%v", s.world[s.player.pos.x][s.player.pos.y])
+        stood_menu_width := max(len(text_stood_menu), len(text_building), len(text_ore))+2
+        
+        if s.grid_rows > STOOD_MENU_HEIGHT && s.grid_cols > stood_menu_width && s.stood_menu {
             // Ore text
-            text_ore := text_buffer("%v", s.world[s.player.pos.x][s.player.pos.y])
-
-            // Building text
-            text_building := string_building(s.buildings[s.player.pos.x][s.player.pos.y]) 
-
-            border_w := max(len(text_building) + 2, STOOD_MENU_WIDTH)
-            draw_border(0, 0, border_w, STOOD_MENU_HEIGHT, BG_COLOR, fill = .All)
-            draw_text("STOOD ON:",   {s.char_width, s.char_height*1} * s.scale, s.scale)
+            draw_border(0, 0, stood_menu_width, STOOD_MENU_HEIGHT, BG_COLOR, fill = .All)
+            draw_text(text_stood_menu,   {s.char_width, s.char_height*1} * s.scale, s.scale)
             draw_text(text_ore,      {s.char_width, s.char_height*2} * s.scale, s.scale)
             draw_text(text_building, {s.char_width, s.char_height*3} * s.scale, s.scale)
         }
 
         // DrawFPS
-        fps_text := rl.GetFPS()
-        draw_border(0, s.grid_rows-3, 4, 3, BG_COLOR, fill = .All)
-        draw_text(text_buffer("%v", fps_text), {1, f32(s.grid_rows)-2}*{s.char_width, s.char_height}*s.scale, s.scale )
+        fps_text := text_buffer("%v", rl.GetFPS())
+        fps_menu_width := len(text_buffer(fps_text))+2
+        if s.grid_rows > FPS_MENU_HEIGHT && s.grid_cols > fps_menu_width && s.fps_menu {
+            draw_border(0, s.grid_rows-FPS_MENU_HEIGHT, fps_menu_width, FPS_MENU_HEIGHT, BG_COLOR, fill = .All)
+            draw_text(fps_text, {1, f32(s.grid_rows)-2}*{s.char_width, s.char_height}*s.scale, s.scale )
+        }        
         
         rl.EndDrawing()
     }    
