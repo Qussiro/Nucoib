@@ -6,6 +6,7 @@ import "core:math"
 import "core:math/rand"
 import "core:container/queue"
 import "core:slice"
+import "core:io"
 import "base:runtime"
 import rl "vendor:raylib"
 
@@ -400,12 +401,23 @@ clear_text_buffer :: proc() {
     s.text_buffer_length = 0
 }
 
-text_buffer :: proc(str: string, args: ..any) -> string{
-    result := fmt.bprintf(s.text_buffer[s.text_buffer_length:], str, ..args)
+text_buffer :: proc(str: string, args: ..any) -> string {
+    stream := io.Stream {procedure = text_buffer_stream_proc}
+    begin := s.text_buffer_length
+    fmt.wprintf(stream, str, ..args, flush = false)
+    return string(s.text_buffer[begin:s.text_buffer_length])
+}
 
-    assert (len(result) > 0)
-    s.text_buffer_length += len(result)
-    return result
+text_buffer_stream_proc :: proc(stream_data: rawptr, mode: io.Stream_Mode, p: []u8, offset: i64, whence: io.Seek_From) -> (n: i64, err: io.Error) {
+    #partial switch mode {
+        case .Write:
+            assert(len(p) <= len(s.text_buffer) - s.text_buffer_length, "Text buffer is full! Maybe you forgot to clean it?")
+            copy(s.text_buffer[s.text_buffer_length:], p)
+            s.text_buffer_length += len(p)
+            n = i64(len(p))
+        case:        fmt.panicf("Not supported mode: %v", mode)
+    }
+    return
 }
 
 main :: proc() {
@@ -767,8 +779,6 @@ main :: proc() {
             draw_text("STOOD ON:",   {s.char_width, s.char_height*1} * s.scale, s.scale)
             draw_text(text_ore,      {s.char_width, s.char_height*2} * s.scale, s.scale)
             draw_text(text_building, {s.char_width, s.char_height*3} * s.scale, s.scale)
-
-            fmt.println(text_ore, len(text_ore))
         }
 
         // DrawFPS
