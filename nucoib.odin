@@ -110,8 +110,8 @@ State :: struct {
     base_menu:            bool,
     fps_menu:             bool,
     count_clusters_sizes: [CLUSTER_SIZE + 1]int,
-    text_buffer:          [512]u8,
-    text_buffer_length:   int,
+    temp_buffer:          [512]u8,
+    temp_buffer_length:   int,
     window_width:         i32,
     window_height:        i32,
     scale:                f32,
@@ -396,17 +396,17 @@ drill_ore_count :: proc(drill: Drill) -> int {
 string_building :: proc(building: BuildingTile) -> string {
     switch building in building {
         case nil:      
-            return text_buffer("None")
+            return tbprintf("None")
         case Drill:    
             if len(building.ores) == 0 {
-                return text_buffer("Drill[:]")
+                return tbprintf("Drill[:]")
             } else {
-                return text_buffer("Drill[%v:%v]", building.ores[0].type,building.ores[0].count)
+                return tbprintf("Drill[%v:%v]", building.ores[0].type,building.ores[0].count)
             }
         case Conveyor: 
-            return text_buffer("Conveyor_%v[%v]", building.direction, building.ore_type)
+            return tbprintf("Conveyor_%v[%v]", building.direction, building.ore_type)
         case Base: 
-            return text_buffer("BASE")
+            return tbprintf("BASE")
         case Part:   
             return string_building(s.buildings[building.main_pos.x][building.main_pos.y])  
         case: panic(fmt.aprintf("Unknown building type %v", building))
@@ -607,12 +607,12 @@ draw :: proc() {
         }
     }
     
-    clear_text_buffer()
+    clear_temp_buffer()
     
     // Base menu
     str_arr: [OreType]string 
     for ore_tile in OreType {
-        str_arr[ore_tile] = text_buffer("%v: %v", ore_tile, s.base.ores[ore_tile])
+        str_arr[ore_tile] = tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile])
     }
     str_length: int
     for str in str_arr {
@@ -641,9 +641,9 @@ draw :: proc() {
     ore := &s.world[s.player.pos.x][s.player.pos.y]
     #partial switch ore.type {
         case .None:
-            text_ore = text_buffer("None")
+            text_ore = tbprintf("None")
         case: 
-            text_ore = text_buffer("%v: %v", ore.type, ore.count)
+            text_ore = tbprintf("%v: %v", ore.type, ore.count)
     }
     stood_menu_width := max(len(text_stood_menu), len(text_building), len(text_ore))+2
     
@@ -656,8 +656,8 @@ draw :: proc() {
     }
 
     // DrawFPS
-    fps_text := text_buffer("%v", rl.GetFPS())
-    fps_menu_width := len(text_buffer(fps_text))+2
+    fps_text := tbprintf("%v", rl.GetFPS())
+    fps_menu_width := len(tbprintf(fps_text))+2
     if s.grid_rows > FPS_MENU_HEIGHT && s.grid_cols > fps_menu_width && s.fps_menu {
         draw_border(0, s.grid_rows-FPS_MENU_HEIGHT, fps_menu_width, FPS_MENU_HEIGHT, BG_COLOR, fill = .All)
         draw_text(fps_text, {1, f32(s.grid_rows)-2} * {s.char_width, s.char_height} * s.scale, s.scale )
@@ -755,23 +755,23 @@ draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32, fg_color: rl.Color = rl.WH
     rl.DrawTexturePro(s.font_texture, source, dest, {}, 0, fg_color) 
 }
 
-clear_text_buffer :: proc() {
-    s.text_buffer_length = 0
+clear_temp_buffer :: proc() {
+    s.temp_buffer_length = 0
 }
 
-text_buffer :: proc(str: string, args: ..any) -> string {
-    stream := io.Stream {procedure = text_buffer_stream_proc}
-    begin := s.text_buffer_length
+tbprintf :: proc(str: string, args: ..any) -> string {
+    stream := io.Stream {procedure = tbprintf_callback}
+    begin := s.temp_buffer_length
     fmt.wprintf(stream, str, ..args, flush = false)
-    return string(s.text_buffer[begin:s.text_buffer_length])
+    return string(s.temp_buffer[begin:s.temp_buffer_length])
 }
 
-text_buffer_stream_proc :: proc(stream_data: rawptr, mode: io.Stream_Mode, p: []u8, offset: i64, whence: io.Seek_From) -> (n: i64, err: io.Error) {
+tbprintf_callback :: proc(stream_data: rawptr, mode: io.Stream_Mode, p: []u8, offset: i64, whence: io.Seek_From) -> (n: i64, err: io.Error) {
     #partial switch mode {
         case .Write:
-            assert(len(p) <= len(s.text_buffer) - s.text_buffer_length, "Text buffer is full! Maybe you forgot to clean it?")
-            copy(s.text_buffer[s.text_buffer_length:], p)
-            s.text_buffer_length += len(p)
+            assert(len(p) <= len(s.temp_buffer) - s.temp_buffer_length, "Text buffer is full! Maybe you forgot to clean it?")
+            copy(s.temp_buffer[s.temp_buffer_length:], p)
+            s.temp_buffer_length += len(p)
             n = i64(len(p))
         case: fmt.panicf("Not supported mode: %v", mode)
     }
