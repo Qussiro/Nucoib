@@ -32,6 +32,7 @@ TRANSPORTATION_SPEED   :: f32(1)
 BG_COLOR               :: rl.Color {0x20, 0x20, 0x20, 0xFF}
 MAX_ORE_COUNT          :: 1000
 MIN_ORE_COUNT          :: 100
+SAVE_FILE_NAME         :: "save.bin"
 
 World     :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
 Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]BuildingTile
@@ -149,8 +150,8 @@ opposite := [Direction]Direction {
 }
 
 save :: proc() {
-    os.remove("save.bin")
-    file, err := os.open("save.bin", os.O_CREATE)
+    _ = os.remove(SAVE_FILE_NAME)
+    file, err := os.open(SAVE_FILE_NAME, os.O_CREATE | os.O_WRONLY, 0o666)
     defer os.close(file) 
     
     if err != nil {
@@ -193,7 +194,7 @@ save :: proc() {
 }
 
 load :: proc() {
-    file, err := os.open("save.bin", os.O_RDONLY)
+    file, err := os.open(SAVE_FILE_NAME, os.O_RDONLY)
     defer os.close(file) 
     
     if err != nil {
@@ -207,8 +208,8 @@ load :: proc() {
     
     for {
         drill_pos: Vec2i
-        _, err = os.read(file, (cast(^[size_of(drill_pos)]byte) &drill_pos)^[:])
-        if err == os.ERROR_EOF do break
+        n, err := os.read(file, (cast(^[size_of(drill_pos)]byte) &drill_pos)^[:])
+        if err == os.ERROR_EOF || n == 0 do break
         if err != nil {
             fmt.println("Can not read drill pos: ", err)
             return
