@@ -225,7 +225,6 @@ load :: proc() {
         }
 
         if ores_length != 0 {
-            reserve(&drill.ores, ores_length)
             resize(&drill.ores, ores_length)
             _, err = os.read(file, mem.slice_to_bytes(drill.ores[:]))
             if err != nil {
