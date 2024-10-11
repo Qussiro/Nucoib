@@ -8,6 +8,7 @@ import "core:container/queue"
 import "core:slice"
 import "core:io"
 import "core:os"
+import "core:mem"
 import "base:runtime"
 import rl "vendor:raylib"
 
@@ -155,39 +156,37 @@ save :: proc() {
     defer os.close(file) 
     
     if err != nil {
-        fmt.println("Can not open file: ", err)
+        fmt.printfln("Can not open file: %v", err)
         return
     }
     
-    os.write(file, (cast(^[size_of(Player)]byte) &s.player)^[:])
-    os.write(file, (cast(^[size_of(World)]byte) &s.world[0][0])^[:])
-    os.write(file, (cast(^[size_of(Buildings)]byte) &s.buildings[0][0])^[:])
+    os.write(file, mem.ptr_to_bytes(&s.player))
+    os.write(file, mem.ptr_to_bytes(&s.world[0][0], WORLD_WIDTH * WORLD_HEIGHT))
+    os.write(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT))
     
-    for i := 0; i < WORLD_WIDTH; i+=1 {
-        for j := 0; j < WORLD_HEIGHT; j+=1 {
-            #partial switch building in s.buildings[i][j] {
-                case Drill:
-                    drill_pos: Vec2i = {i, j}
-                    _, err = os.write(file, (cast(^[size_of(Vec2i)]byte) &drill_pos)^[:])
-                    if err != nil {
-                        fmt.println("Can not save drill pos: ", err)
-                        return
-                    }
-                    
-                    ores_length := len(building.ores)
-                    _, err = os.write(file, (cast(^[size_of(ores_length)]byte) &ores_length)^[:])
-                    if err != nil {
-                        fmt.println("Can not save ores length: ", err)
-                        return
-                    }
+    for i := 0; i < WORLD_WIDTH; i += 1 {
+        for j := 0; j < WORLD_HEIGHT; j += 1 {
+            if drill, ok := s.buildings[i][j].(Drill); ok {
+                _, err = os.write(file, mem.ptr_to_bytes(&Vec2i{i, j}))
+                if err != nil {
+                    fmt.printfln("Can not save drill pos: %v", err)
+                    return
+                }
+                
+                ores_length := len(drill.ores)
+                _, err = os.write(file, mem.ptr_to_bytes(&ores_length))
+                if err != nil {
+                    fmt.printfln("Can not save ores length: %v", err)
+                    return
+                }
 
-                    if ores_length != 0 {
-                        _, err = os.write(file, (cast([^]byte) (cast(^u8) &building.ores[0]))[:ores_length*size_of(Ore)])
-                        if err != nil {
-                            fmt.println("Can not save ores array: ", err)
-                            return
-                        }
-                    } 
+                if ores_length != 0 {
+                    _, err = os.write(file, mem.slice_to_bytes(drill.ores[:]))
+                    if err != nil {
+                        fmt.printfln("Can not save ores array: %v", err)
+                        return
+                    }
+                } 
             }
         }
     }
@@ -198,37 +197,37 @@ load :: proc() {
     defer os.close(file) 
     
     if err != nil {
-        fmt.println("Can not open file: ", err)
+        fmt.printfln("Can not open file: %v", err)
         return
     }
     
-    os.read(file, (cast(^[size_of(Player)]byte) &s.player)^[:])
-    os.read(file, (cast(^[size_of(World)]byte) &s.world[0][0])^[:])
-    os.read(file, (cast(^[size_of(Buildings)]byte) &s.buildings[0][0])^[:])
+    os.read(file, mem.ptr_to_bytes(&s.player))
+    os.read(file, mem.ptr_to_bytes(&s.world[0][0], WORLD_WIDTH * WORLD_HEIGHT))
+    os.read(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT))
     
     for {
         drill_pos: Vec2i
-        n, err := os.read(file, (cast(^[size_of(drill_pos)]byte) &drill_pos)^[:])
+        n, err := os.read(file, mem.ptr_to_bytes(&drill_pos))
         if err == os.ERROR_EOF || n == 0 do break
         if err != nil {
-            fmt.println("Can not read drill pos: ", err)
+            fmt.printfln("Can not read drill pos: %v", err)
             return
         }
        
         drill := &s.buildings[drill_pos.x][drill_pos.y].(Drill)
         drill.ores = {}
-        ores_length: int
         
-        _, err = os.read(file, (cast(^[size_of(ores_length)]byte) &ores_length)^[:])
+        ores_length: int
+        _, err = os.read(file, mem.ptr_to_bytes(&ores_length))
         if err != nil {
-            fmt.println("Can not read ores length: ", err)
+            fmt.printfln("Can not read ores length: %v", err)
             return
         }
 
         if ores_length != 0 {
             reserve(&drill.ores, ores_length)
             resize(&drill.ores, ores_length)
-            _, err = os.read(file, (cast([^]byte) (cast(^u8) &drill.ores[0]))[:ores_length*size_of(Ore)])
+            _, err = os.read(file, mem.slice_to_bytes(drill.ores[:]))
             if err != nil {
                 fmt.println("Can not read ores array: ", err)
                 return
