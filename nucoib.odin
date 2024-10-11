@@ -7,6 +7,7 @@ import "core:math/rand"
 import "core:container/queue"
 import "core:slice"
 import "core:io"
+import "core:os"
 import "base:runtime"
 import rl "vendor:raylib"
 
@@ -24,8 +25,8 @@ CLUSTER_COUNT          :: 10000
 MIN_SCALE              :: f32(1)
 MAX_SCALE              :: f32(20)
 ORE_SCALE              :: f32(0.5)
-ZOOM_COOLDOWN          :: f32(0.0)
 MOVE_COOLDOWN          :: f32(0.05)
+DIGGING_COOLDOWN       :: f32(0.5)
 DRILLING_TIME          :: f32(0.5) 
 TRANSPORTATION_SPEED   :: f32(1)
 BG_COLOR               :: rl.Color {0x20, 0x20, 0x20, 0xFF}
@@ -106,7 +107,7 @@ State :: struct {
     grid_rows:            int,
     grid_cols:            int,
     pressed_move:         f32,
-    pressed_zoom:         f32,
+    pressed_dig:          f32,
     stood_menu:           bool,
     base_menu:            bool,
     fps_menu:             bool,
@@ -145,6 +146,94 @@ opposite := [Direction]Direction {
     .Down  = .Up,
     .Left  = .Right,
     .Up    = .Down,
+}
+
+save :: proc() {
+    os.remove("save.bin")
+    file, err := os.open("save.bin", os.O_CREATE)
+    defer os.close(file) 
+    
+    if err != nil {
+        fmt.println("Can not open file: ", err)
+        return
+    }
+    
+    os.write(file, (cast(^[size_of(Player)]byte) &s.player)^[:])
+    os.write(file, (cast(^[size_of(World)]byte) &s.world[0][0])^[:])
+    os.write(file, (cast(^[size_of(Buildings)]byte) &s.buildings[0][0])^[:])
+    
+    for i := 0; i < WORLD_WIDTH; i+=1 {
+        for j := 0; j < WORLD_HEIGHT; j+=1 {
+            #partial switch building in s.buildings[i][j] {
+                case Drill:
+                    drill_pos: Vec2i = {i, j}
+                    _, err = os.write(file, (cast(^[size_of(Vec2i)]byte) &drill_pos)^[:])
+                    if err != nil {
+                        fmt.println("Can not save drill pos: ", err)
+                        return
+                    }
+                    
+                    ores_length := len(building.ores)
+                    _, err = os.write(file, (cast(^[size_of(ores_length)]byte) &ores_length)^[:])
+                    if err != nil {
+                        fmt.println("Can not save ores length: ", err)
+                        return
+                    }
+
+                    if ores_length != 0 {
+                        _, err = os.write(file, (cast([^]byte) (cast(^u8) &building.ores[0]))[:ores_length*size_of(Ore)])
+                        if err != nil {
+                            fmt.println("Can not save ores array: ", err)
+                            return
+                        }
+                    } 
+            }
+        }
+    }
+}
+
+load :: proc() {
+    file, err := os.open("save.bin", os.O_RDONLY)
+    defer os.close(file) 
+    
+    if err != nil {
+        fmt.println("Can not open file: ", err)
+        return
+    }
+    
+    os.read(file, (cast(^[size_of(Player)]byte) &s.player)^[:])
+    os.read(file, (cast(^[size_of(World)]byte) &s.world[0][0])^[:])
+    os.read(file, (cast(^[size_of(Buildings)]byte) &s.buildings[0][0])^[:])
+    
+    for {
+        drill_pos: Vec2i
+        _, err = os.read(file, (cast(^[size_of(drill_pos)]byte) &drill_pos)^[:])
+        if err == os.ERROR_EOF do break
+        if err != nil {
+            fmt.println("Can not read drill pos: ", err)
+            return
+        }
+       
+        drill := &s.buildings[drill_pos.x][drill_pos.y].(Drill)
+        drill.ores = {}
+        ores_length: int
+        
+        _, err = os.read(file, (cast(^[size_of(ores_length)]byte) &ores_length)^[:])
+        if err != nil {
+            fmt.println("Can not read ores length: ", err)
+            return
+        }
+
+        if ores_length != 0 {
+            reserve(&drill.ores, ores_length)
+            resize(&drill.ores, ores_length)
+            _, err = os.read(file, (cast([^]byte) (cast(^u8) &drill.ores[0]))[:ores_length*size_of(Ore)])
+            if err != nil {
+                fmt.println("Can not read ores array: ", err)
+                return
+            }
+        }
+    }
 }
 
 cluster_generation :: proc(tile: OreType) {
@@ -187,8 +276,12 @@ cluster_generation :: proc(tile: OreType) {
         min := int(y * MIN_ORE_COUNT)
         max := int(y * MAX_ORE_COUNT)
         count := rand.int_max(max - min) + min
-        
-        s.world[ci.x][ci.y] = {tile, count}
+
+        if tile == .None {
+            s.world[ci.x][ci.y] = {tile, 0}
+        } else {
+            s.world[ci.x][ci.y] = {tile, count}
+        }
         count_usefull += 1
     }
     
@@ -223,18 +316,13 @@ input :: proc(dt: f32) {
         s.pressed_move = MOVE_COOLDOWN      
     }
     
-    if s.pressed_zoom > 0 {
-        s.pressed_zoom -= dt 
-    } else {
-        if rl.IsKeyPressed(rl.KeyboardKey.MINUS) {
-            s.scale = max(MIN_SCALE, s.scale*0.9)
-            s.grid_rows, s.grid_cols = grid_size()
-        }
-        if rl.IsKeyPressed(rl.KeyboardKey.EQUAL) {
-            s.scale = min(s.scale*1.1, MAX_SCALE)
-            s.grid_rows, s.grid_cols = grid_size()
-        }
-        s.pressed_zoom = ZOOM_COOLDOWN
+    if rl.IsKeyPressed(rl.KeyboardKey.MINUS) {
+        s.scale = max(MIN_SCALE, s.scale*0.9)
+        s.grid_rows, s.grid_cols = grid_size()
+    }
+    if rl.IsKeyPressed(rl.KeyboardKey.EQUAL) {
+        s.scale = min(s.scale*1.1, MAX_SCALE)
+        s.grid_rows, s.grid_cols = grid_size()
     }
     
     drill: if rl.IsKeyDown(rl.KeyboardKey.D) {
@@ -276,6 +364,29 @@ input :: proc(dt: f32) {
     }
     if rl.IsKeyDown(rl.KeyboardKey.X) {
         delete_building(s.player.pos)        
+    }
+    if rl.IsKeyDown(rl.KeyboardKey.SPACE) {
+        if s.pressed_dig > 0 {
+            s.pressed_dig -= dt
+        } else {
+            current_tile := &s.world[s.player.pos.x][s.player.pos.y]
+            if current_tile.type != .None {
+                s.base.ores[current_tile.type] += 1
+                current_tile.count -= 1
+                if current_tile.count <= 0 do current_tile.type = .None
+                s.pressed_dig = DIGGING_COOLDOWN 
+            }
+        }
+    }
+    if rl.IsKeyPressed(rl.KeyboardKey.F5) {
+        time := rl.GetTime()
+        save()
+        fmt.printfln("Saved in %.6vs", rl.GetTime()-time)
+    }
+    if rl.IsKeyPressed(rl.KeyboardKey.F9) {
+        time := rl.GetTime()
+        load()        
+        fmt.printfln("Loaded in %.6vs", rl.GetTime()-time)
     }
 }
 
@@ -395,18 +506,18 @@ drill_ore_count :: proc(drill: Drill) -> int {
 }
 
 string_building :: proc(building: BuildingTile) -> string {
-    switch building in building {
+    switch build in building {
         case Drill:    
-            if len(building.ores) == 0 {
+            if len(build.ores) == 0 {
                 return tbprintf("Drill[:]")
             } else {
-                return tbprintf("Drill[%v:%v]", building.ores[0].type, building.ores[0].count)
+                return tbprintf("Drill[%v:%v]", build.ores[0].type, build.ores[0].count)
             }
         case nil:      return tbprintf("None")
-        case Conveyor: return tbprintf("Conveyor_%v[%v]", building.direction, building.ore_type)
+        case Conveyor: return tbprintf("Conveyor_%v[%v]", build.direction, build.ore_type)
         case Base:     return tbprintf("Base")
-        case Part:     return string_building(s.buildings[building.main_pos.x][building.main_pos.y])  
-        case:                 panic(fmt.aprintf("Unknown building type %v", building))
+        case Part:     return string_building(s.buildings[build.main_pos.x][build.main_pos.y])  
+        case:          panic(fmt.aprintf("Unknown building type %v", build))
     }
 }
 
