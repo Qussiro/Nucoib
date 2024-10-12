@@ -237,8 +237,8 @@ load :: proc() {
 }
 
 cluster_generation :: proc(tile: OreType) {
-    count_useless := 0
-    count_usefull := 0
+    visited_count := 0
+    generated_count := 0
     cx := rand.int_max(WORLD_WIDTH)
     cy := rand.int_max(WORLD_HEIGHT)
 
@@ -252,15 +252,11 @@ cluster_generation :: proc(tile: OreType) {
         if slice.contains(visited[:], ci) do continue
         append(&visited, ci)
         
-        // y = -x/10+1
         r := rand.float32()
-        y := -f32(count_useless) / CLUSTER_SIZE + 1
-        count_useless += 1
+        y := -f32(visited_count) / CLUSTER_SIZE + 1
+        visited_count += 1
         if r >= y do continue
 
-        // y = -log(x/10)
-        // if rand.float32() >= -math.log10(f32(count_useless)/CLUSTER_SIZE) do continue      
-        
         if ci.x - 1 != -1 {
             queue.push_back(&tovisit, Vec2i{ci.x-1, ci.y})
         }
@@ -273,19 +269,19 @@ cluster_generation :: proc(tile: OreType) {
         if ci.y + 1 != WORLD_HEIGHT {
             queue.push_back(&tovisit, Vec2i{ci.x, ci.y+1})
         }
-        min := int(y * MIN_ORE_COUNT)
-        max := int(y * MAX_ORE_COUNT)
-        count := rand.int_max(max - min) + min
 
-        if tile == .None {
-            s.world[ci.x][ci.y] = {tile, 0}
-        } else {
-            s.world[ci.x][ci.y] = {tile, count}
+        count := 0
+        if tile != .None {
+            min := int(y * MIN_ORE_COUNT)
+            max := int(y * MAX_ORE_COUNT)
+            count = rand.int_max(max - min) + min
         }
-        count_usefull += 1
+
+        s.world[ci.x][ci.y] = {tile, count}
+        generated_count += 1
     }
     
-    s.count_clusters_sizes[count_usefull] += 1
+    s.count_clusters_sizes[generated_count] += 1
     delete(visited)
     queue.destroy(&tovisit)
 }
@@ -298,6 +294,12 @@ grid_size :: proc() -> (int, int) {
 }
 
 input :: proc(dt: f32) {
+    if rl.IsWindowResized() {
+        s.window_width = rl.GetScreenWidth()
+        s.window_height = rl.GetScreenHeight()
+        s.grid_rows, s.grid_cols = grid_size()
+    }
+
     if s.pressed_move > 0 {
         s.pressed_move -= dt
     } else {
@@ -317,11 +319,11 @@ input :: proc(dt: f32) {
     }
     
     if rl.IsKeyPressed(rl.KeyboardKey.MINUS) {
-        s.scale = max(MIN_SCALE, s.scale*0.9)
+        s.scale = max(MIN_SCALE, 0.9 * s.scale)
         s.grid_rows, s.grid_cols = grid_size()
     }
     if rl.IsKeyPressed(rl.KeyboardKey.EQUAL) {
-        s.scale = min(s.scale*1.1, MAX_SCALE)
+        s.scale = min(1.1 * s.scale, MAX_SCALE)
         s.grid_rows, s.grid_cols = grid_size()
     }
     
@@ -365,10 +367,10 @@ input :: proc(dt: f32) {
     if rl.IsKeyDown(rl.KeyboardKey.X) {
         delete_building(s.player.pos)        
     }
-    if rl.IsKeyDown(rl.KeyboardKey.SPACE) {
-        if s.pressed_dig > 0 {
-            s.pressed_dig -= dt
-        } else {
+    if s.pressed_dig > 0 {
+        s.pressed_dig -= dt
+    } else {
+        if rl.IsKeyDown(rl.KeyboardKey.SPACE) {
             current_tile := &s.world[s.player.pos.x][s.player.pos.y]
             if current_tile.type != .None {
                 s.base.ores[current_tile.type] += 1
@@ -401,19 +403,18 @@ update :: proc(dt: f32) {
                     if building.drilling_timer >= DRILLING_TIME {
                         if drill_ore_count(building) < building.capacity {
                             if next_ore.type != .None {
-                                if len(building.ores) != 0 && building.ores[len(building.ores) - 1].type == next_ore.type {
-                                    building.ores[len(building.ores) - 1].count += 1
+                                ores := building.ores[:]
+                                if !slice.is_empty(ores) && slice.last(ores).type == next_ore.type {
+                                    slice.last_ptr(ores).count += 1
                                 } else {
                                     append(&building.ores, Ore{next_ore.type, 1})
                                 }
                                 
                                 next_ore.count -= 1
-                                if next_ore.count <= 0 {
-                                    next_ore^ = {}
-                                }
-                            } 
+                                if next_ore.count <= 0 do next_ore^ = {}
+                            }
                             building.next_tile = (building.next_tile + 1) % 4
-                        } 
+                        }
                         building.drilling_timer = 0
                     }
                     building.drilling_timer += dt
@@ -449,7 +450,7 @@ update :: proc(dt: f32) {
                     if building.ore_type == .None do continue
                     
                     building.transportation_progress += dt * TRANSPORTATION_SPEED
-                    next_pos := Vec2i{i, j} + offsets[building.direction]
+                    next_pos := offsets[building.direction] + {i, j}
                     max_progress: f32 = 1
                     
                     if check_boundaries(next_pos) { 
@@ -525,10 +526,10 @@ delete_building :: proc(pos: Vec2i) {
     switch building in s.buildings[pos.x][pos.y] {
         case nil:
         case Drill:
-            s.buildings[pos.x+0][pos.y+0] = {}
-            s.buildings[pos.x+1][pos.y+0] = {}
-            s.buildings[pos.x+1][pos.y+1] = {}
-            s.buildings[pos.x+0][pos.y+1] = {}
+            s.buildings[pos.x + 0][pos.y + 0] = {}
+            s.buildings[pos.x + 1][pos.y + 0] = {}
+            s.buildings[pos.x + 1][pos.y + 1] = {}
+            s.buildings[pos.x + 0][pos.y + 1] = {}
         case Conveyor:
             s.buildings[pos.x][pos.y] = {}
         case Base:
@@ -619,9 +620,9 @@ draw :: proc() {
                 case Drill: 
                     draw_char('D', pos + 0.375*{s.char_width, s.char_height} * s.scale, 1.25*s.scale, rl.MAGENTA)
                     switch building.direction {
-                        case .Right: draw_char('>',   pos + 0.5*{s.char_width * 2.2, s.char_height} * s.scale, s.scale)
+                        case .Right: draw_char('>', pos + 0.5*{s.char_width * 2.2, s.char_height} * s.scale, s.scale)
                         case .Down:  draw_char('~' + 1, pos + 0.5*{s.char_width, s.char_height * 2.1} * s.scale, s.scale)
-                        case .Left:  draw_char('<',   pos + 0.5*{s.char_width * -0.2, s.char_height} * s.scale, s.scale)
+                        case .Left:  draw_char('<', pos + 0.5*{s.char_width * -0.2, s.char_height} * s.scale, s.scale)
                         case .Up:    draw_char('~' + 2, pos + 0.5*{s.char_width, s.char_height * -0.1} * s.scale, s.scale)
                     }
                 case Conveyor:
@@ -732,7 +733,7 @@ draw :: proc() {
     base_menu_height := int(max(OreType)) + 3
     
     if s.grid_cols > base_menu_width && s.grid_rows > base_menu_height && s.base_menu {
-        draw_border(s.grid_cols-base_menu_width, 0, base_menu_width, base_menu_height, BG_COLOR, fill = .All)
+        draw_border(s.grid_cols - base_menu_width, 0, base_menu_width, base_menu_height, BG_COLOR, fill = .All)
         for str, i in str_arr {
             pos := rl.Vector2 {
                 f32(s.grid_cols - str_length - 1) * s.char_width,
@@ -759,16 +760,16 @@ draw :: proc() {
     if s.grid_rows > STOOD_MENU_HEIGHT && s.grid_cols > stood_menu_width && s.stood_menu {
         // Ore text
         draw_border(0, 0, stood_menu_width, STOOD_MENU_HEIGHT, BG_COLOR, fill = .All)
-        draw_text(text_stood_menu, {s.char_width, s.char_height*1} * s.scale, s.scale)
-        draw_text(text_ore,        {s.char_width, s.char_height*2} * s.scale, s.scale)
-        draw_text(text_building,   {s.char_width, s.char_height*3} * s.scale, s.scale)
+        draw_text(text_stood_menu, {s.char_width, s.char_height * 1} * s.scale, s.scale)
+        draw_text(text_ore,        {s.char_width, s.char_height * 2} * s.scale, s.scale)
+        draw_text(text_building,   {s.char_width, s.char_height * 3} * s.scale, s.scale)
     }
 
     // DrawFPS
     fps_text := tbprintf("%v", rl.GetFPS())
-    fps_menu_width := len(tbprintf(fps_text)) + 2
+    fps_menu_width := len(fps_text) + 2
     if s.grid_rows > FPS_MENU_HEIGHT && s.grid_cols > fps_menu_width && s.fps_menu {
-        draw_border(0, s.grid_rows-FPS_MENU_HEIGHT, fps_menu_width, FPS_MENU_HEIGHT, BG_COLOR, fill = .All)
+        draw_border(0, s.grid_rows - FPS_MENU_HEIGHT, fps_menu_width, FPS_MENU_HEIGHT, BG_COLOR, fill = .All)
         draw_text(fps_text, {1, f32(s.grid_rows) - 2} * {s.char_width, s.char_height} * s.scale, s.scale )
     }
 }
@@ -811,7 +812,7 @@ draw_border :: proc(x, y, w, h: int, bg_color: rl.Color = {}, fg_color: rl.Color
         
         dest = rl.Rectangle {
             x = f32(x) * s.char_width * s.scale,
-            y = (f32(y) + f32(h) - 1)* s.char_height * s.scale,
+            y = (f32(y) + f32(h) - 1) * s.char_height * s.scale,
             width = f32(w) * s.char_width * s.scale,
             height = s.char_height * s.scale,
         }
@@ -869,7 +870,7 @@ clear_temp_buffer :: proc() {
 }
 
 tbprintf :: proc(str: string, args: ..any) -> string {
-    stream := io.Stream {procedure = tbprintf_callback}
+    stream := io.Stream{procedure = tbprintf_callback}
     begin := s.temp_buffer_length
     fmt.wprintf(stream, str, ..args, flush = false)
     return string(s.temp_buffer[begin:s.temp_buffer_length])
@@ -967,13 +968,6 @@ main :: proc() {
     
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
-        
-        if rl.IsWindowResized() {
-            s.window_width = rl.GetScreenWidth()
-            s.window_height = rl.GetScreenHeight()
-
-            s.grid_rows, s.grid_cols = grid_size()
-        }
         
         dt := rl.GetFrameTime()
         
