@@ -930,6 +930,12 @@ main :: proc() {
         nucoib_errln("Need memory: %v bytes", size_of(Buildings))
     }
     
+    total_size := f64(size_of(World) + size_of(Buildings)) / 1e6
+    world_size := f64(size_of(World)) / 1e6
+    buildings_size := f64(size_of(Buildings)) / 1e6
+    nucoib_logln("Map size: %v Mb", total_size)
+    nucoib_logln("  - World: %v Mb (%.2v%%)", world_size, world_size / total_size * 100)
+    nucoib_logln("  - Buildings: %v Mb (%.2v%%)", buildings_size, buildings_size / total_size * 100)
     
     s.font_texture = rl.LoadTexture("./atlas.png")
     s.char_width = f32(int(s.font_texture.width) / ATLAS_COLS)
