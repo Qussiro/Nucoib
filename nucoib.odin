@@ -10,6 +10,7 @@ import "core:io"
 import "core:os"
 import "core:mem"
 import "base:runtime"
+import "base:intrinsics"
 import rl "vendor:raylib"
 
 ATLAS_COLS             :: 18
@@ -156,7 +157,7 @@ save :: proc() {
     defer os.close(file) 
     
     if err != nil {
-        fmt.printfln("Can not open file: %v", err)
+        nucoib_errln("Can not open file: %v", err)
         return
     }
     
@@ -169,21 +170,21 @@ save :: proc() {
             if drill, ok := s.buildings[i][j].(Drill); ok {
                 _, err = os.write(file, mem.ptr_to_bytes(&Vec2i{i, j}))
                 if err != nil {
-                    fmt.printfln("Can not save drill pos: %v", err)
+                    nucoib_errln("Can not save drill pos: %v", err)
                     return
                 }
                 
                 ores_length := len(drill.ores)
                 _, err = os.write(file, mem.ptr_to_bytes(&ores_length))
                 if err != nil {
-                    fmt.printfln("Can not save ores length: %v", err)
+                    nucoib_errln("Can not save ores length: %v", err)
                     return
                 }
 
                 if ores_length != 0 {
                     _, err = os.write(file, mem.slice_to_bytes(drill.ores[:]))
                     if err != nil {
-                        fmt.printfln("Can not save ores array: %v", err)
+                        nucoib_errln("Can not save ores array: %v", err)
                         return
                     }
                 } 
@@ -197,7 +198,7 @@ load :: proc() {
     defer os.close(file) 
     
     if err != nil {
-        fmt.printfln("Can not open file: %v", err)
+        nucoib_errln("Can not open file: %v", err)
         return
     }
     
@@ -210,7 +211,7 @@ load :: proc() {
         n, err := os.read(file, mem.ptr_to_bytes(&drill_pos))
         if err == os.ERROR_EOF || n == 0 do break
         if err != nil {
-            fmt.printfln("Can not read drill pos: %v", err)
+            nucoib_errln("Can not read drill pos: %v", err)
             return
         }
        
@@ -220,7 +221,7 @@ load :: proc() {
         ores_length: int
         _, err = os.read(file, mem.ptr_to_bytes(&ores_length))
         if err != nil {
-            fmt.printfln("Can not read ores length: %v", err)
+            nucoib_errln("Can not read ores length: %v", err)
             return
         }
 
@@ -228,7 +229,7 @@ load :: proc() {
             resize(&drill.ores, ores_length)
             _, err = os.read(file, mem.slice_to_bytes(drill.ores[:]))
             if err != nil {
-                fmt.println("Can not read ores array: ", err)
+                nucoib_errln("Can not read ores array: %v", err)
                 return
             }
         }
@@ -380,12 +381,12 @@ input :: proc(dt: f32) {
     if rl.IsKeyPressed(rl.KeyboardKey.F5) {
         time := rl.GetTime()
         save()
-        fmt.printfln("Saved in %.6vs", rl.GetTime()-time)
+        nucoib_logln("Saved in %.6vs", rl.GetTime() - time)
     }
     if rl.IsKeyPressed(rl.KeyboardKey.F9) {
         time := rl.GetTime()
         load()        
-        fmt.printfln("Loaded in %.6vs", rl.GetTime()-time)
+        nucoib_logln("Loaded in %.6vs", rl.GetTime() - time)
     }
 }
 
@@ -516,7 +517,7 @@ string_building :: proc(building: BuildingTile) -> string {
         case Conveyor: return tbprintf("Conveyor_%v[%v]", build.direction, build.ore_type)
         case Base:     return tbprintf("Base")
         case Part:     return string_building(s.buildings[build.main_pos.x][build.main_pos.y])  
-        case:          panic(fmt.aprintf("Unknown building type %v", build))
+        case:          nucoib_panic("Unknown building type %v", build)
     }
 }
 
@@ -554,7 +555,7 @@ draw :: proc() {
                 case .Iron:     ch_ore = 'I'
                 case .Tungsten: ch_ore = 'T'
                 case .Coal:     ch_ore = 'C'
-                case: panic(fmt.aprintf("Unknown ore type: %v", s.world[i][j]))
+                case: nucoib_panic("Unknown ore type: %v", s.world[i][j])
             }
             
             pos := rl.Vector2 {
@@ -679,7 +680,7 @@ draw :: proc() {
                     case .Iron:     c = 'I'
                     case .Tungsten: c = 'T'
                     case .Coal:     c = 'C'
-                    case: panic(fmt.aprintf("Unknown ore type: %v", conveyor.ore_type))
+                    case: nucoib_panic("Unknown ore type: %v", conveyor.ore_type)
                 }
 
                 draw_char(c, ore_offset, s.scale * ORE_SCALE, rl.GOLD)
@@ -881,9 +882,35 @@ tbprintf_callback :: proc(stream_data: rawptr, mode: io.Stream_Mode, p: []u8, of
             copy(s.temp_buffer[s.temp_buffer_length:], p)
             s.temp_buffer_length += len(p)
             n = i64(len(p))
-        case: fmt.panicf("Not supported mode: %v", mode)
+        case: nucoib_panic("Not supported mode: %v", mode)
     }
     return
+}
+
+nucoib_log :: proc(str: string, args: ..any) {
+    fmt.print("[LOG]: ")
+    fmt.printf(str, ..args)
+}
+
+nucoib_logln :: proc(str: string, args: ..any) {
+    fmt.print("[LOG]: ")
+    fmt.printfln(str, ..args)
+}
+
+nucoib_err :: proc(str: string, args: ..any) {
+    fmt.eprint("[ERROR]: ")
+    fmt.eprintf(str, ..args)
+}
+
+nucoib_errln :: proc(str: string, args: ..any) {
+    fmt.eprint("[ERROR]: ")
+    fmt.eprintfln(str, ..args)
+}
+
+nucoib_panic :: proc(str: string, args: ..any, loc := #caller_location) -> ! {
+    fmt.eprintf("[PANIC]: %v: ", loc)
+    fmt.eprintfln(str, ..args)
+    intrinsics.trap()
 }
 
 main :: proc() {
@@ -894,16 +921,15 @@ main :: proc() {
     err: runtime.Allocator_Error
     s.world, err = new(World)
     if err != nil {
-        fmt.println("Buy MORE RAM! --> ", err)
-        fmt.println("Need memory: ", size_of(World), "Bytes")
+        nucoib_errln("Buy MORE RAM! --> %v", err)
+        nucoib_errln("Need memory: %v bytes", size_of(World))
     }
     s.buildings, err = new(Buildings)
     if err != nil {
-        fmt.println("Buy MORE RAM! --> ", err)
-        fmt.println("Need memory: ", size_of(Buildings), "Bytes")
+        nucoib_errln("Buy MORE RAM! --> %v", err)
+        nucoib_errln("Need memory: %v bytes", size_of(Buildings))
     }
     
-    fmt.println("Map size: ", size_of(World) + size_of(Buildings), "Bytes")
     
     s.font_texture = rl.LoadTexture("./atlas.png")
     s.char_width = f32(int(s.font_texture.width) / ATLAS_COLS)
