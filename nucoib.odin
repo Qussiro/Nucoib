@@ -36,15 +36,15 @@ MAX_ORE_COUNT          :: 1000
 MIN_ORE_COUNT          :: 100
 SAVE_FILE_NAME         :: "save.bin"
 
-World     :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
-Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]BuildingTile
+Ores      :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
+Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]Building
 Vec2i     :: [2]int
 
 Player :: struct { 
     pos: Vec2i,
 }
 
-BuildingTile :: union {
+Building :: union {
     Drill,
     Conveyor,
     Base,
@@ -53,16 +53,15 @@ BuildingTile :: union {
 
 Drill :: struct {
     ores:           [dynamic]Ore,
-    capacity:       int,
+    capacity:       u8,
+    next_tile:      u8,
     drilling_timer: f32,
-    next_tile:      int,
     direction:      Direction,
 }
 
 Conveyor :: struct {
     direction:               Direction,
     ore_type:                OreType,
-    capacity:                int,
     transportation_progress: f32,
 }
 
@@ -92,7 +91,7 @@ Fill :: enum {
     Partial,
 }
 
-Direction :: enum {
+Direction :: enum u8 {
    Right,
    Down,
    Left,
@@ -100,7 +99,7 @@ Direction :: enum {
 }
 
 State :: struct {
-    world:                ^World,
+    world:                ^Ores,
     buildings:            ^Buildings,
     base:                 ^Base, 
     player:               Player,
@@ -398,10 +397,10 @@ update :: proc(dt: f32) {
             switch &building in s.buildings[i][j] {
                 case nil:
                 case Drill: 
-                    next_ore := &s.world[i + building.next_tile % 2][j + building.next_tile / 2]
+                    next_ore := &s.world[i + int(building.next_tile) % 2][j + int(building.next_tile) / 2]
                     
                     if building.drilling_timer >= DRILLING_TIME {
-                        if drill_ore_count(building) < building.capacity {
+                        if drill_ore_count(building) < int(building.capacity) {
                             if next_ore.type != .None {
                                 ores := building.ores[:]
                                 if !slice.is_empty(ores) && slice.last(ores).type == next_ore.type {
@@ -506,7 +505,7 @@ drill_ore_count :: proc(drill: Drill) -> int {
     return count
 }
 
-string_building :: proc(building: BuildingTile) -> string {
+string_building :: proc(building: Building) -> string {
     switch build in building {
         case Drill:    
             if len(build.ores) == 0 {
@@ -920,10 +919,10 @@ main :: proc() {
     rl.SetTargetFPS(60)
     
     err: runtime.Allocator_Error
-    s.world, err = new(World)
+    s.world, err = new(Ores)
     if err != nil {
         nucoib_errln("Buy MORE RAM! --> %v", err)
-        nucoib_errln("Need memory: %v bytes", size_of(World))
+        nucoib_errln("Need memory: %v bytes", size_of(Ores))
     }
     s.buildings, err = new(Buildings)
     if err != nil {
@@ -931,11 +930,11 @@ main :: proc() {
         nucoib_errln("Need memory: %v bytes", size_of(Buildings))
     }
     
-    total_size := f64(size_of(World) + size_of(Buildings)) / 1e6
-    world_size := f64(size_of(World)) / 1e6
+    total_size := f64(size_of(Ores) + size_of(Buildings)) / 1e6
+    world_size := f64(size_of(Ores)) / 1e6
     buildings_size := f64(size_of(Buildings)) / 1e6
     nucoib_logln("Map size: %v Mb", total_size)
-    nucoib_logln("  - World: %v Mb (%.2v%%)", world_size, world_size / total_size * 100)
+    nucoib_logln("  - Ores: %v Mb (%.2v%%)", world_size, world_size / total_size * 100)
     nucoib_logln("  - Buildings: %v Mb (%.2v%%)", buildings_size, buildings_size / total_size * 100)
     
     s.font_texture = rl.LoadTexture("./atlas.png")
