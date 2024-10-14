@@ -8,7 +8,9 @@ import "core:container/queue"
 import "core:slice"
 import "core:io"
 import "core:os"
+import "core:mem"
 import "base:runtime"
+import "base:intrinsics"
 import rl "vendor:raylib"
 
 ATLAS_COLS             :: 18
@@ -32,16 +34,17 @@ TRANSPORTATION_SPEED   :: f32(1)
 BG_COLOR               :: rl.Color {0x20, 0x20, 0x20, 0xFF}
 MAX_ORE_COUNT          :: 1000
 MIN_ORE_COUNT          :: 100
+SAVE_FILE_NAME         :: "save.bin"
 
-World     :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
-Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]BuildingTile
+Ores      :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
+Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]Building
 Vec2i     :: [2]int
 
 Player :: struct { 
     pos: Vec2i,
 }
 
-BuildingTile :: union {
+Building :: union {
     Drill,
     Conveyor,
     Base,
@@ -50,16 +53,15 @@ BuildingTile :: union {
 
 Drill :: struct {
     ores:           [dynamic]Ore,
-    capacity:       int,
+    capacity:       u8,
+    next_tile:      u8,
     drilling_timer: f32,
-    next_tile:      int,
     direction:      Direction,
 }
 
 Conveyor :: struct {
     direction:               Direction,
     ore_type:                OreType,
-    capacity:                int,
     transportation_progress: f32,
 }
 
@@ -89,7 +91,7 @@ Fill :: enum {
     Partial,
 }
 
-Direction :: enum {
+Direction :: enum u8 {
    Right,
    Down,
    Left,
@@ -97,7 +99,7 @@ Direction :: enum {
 }
 
 State :: struct {
-    world:                ^World,
+    world:                ^Ores,
     buildings:            ^Buildings,
     base:                 ^Base, 
     player:               Player,
@@ -149,87 +151,84 @@ opposite := [Direction]Direction {
 }
 
 save :: proc() {
-    os.remove("save.bin")
-    file, err := os.open("save.bin", os.O_CREATE)
+    _ = os.remove(SAVE_FILE_NAME)
+    file, err := os.open(SAVE_FILE_NAME, os.O_CREATE | os.O_WRONLY, 0o666)
     defer os.close(file) 
     
     if err != nil {
-        fmt.println("Can not open file: ", err)
+        nucoib_errln("Can not open file: %v", err)
         return
     }
     
-    os.write(file, (cast(^[size_of(Player)]byte) &s.player)^[:])
-    os.write(file, (cast(^[size_of(World)]byte) &s.world[0][0])^[:])
-    os.write(file, (cast(^[size_of(Buildings)]byte) &s.buildings[0][0])^[:])
+    os.write(file, mem.ptr_to_bytes(&s.player))
+    os.write(file, mem.ptr_to_bytes(&s.world[0][0], WORLD_WIDTH * WORLD_HEIGHT))
+    os.write(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT))
     
-    for i := 0; i < WORLD_WIDTH; i+=1 {
-        for j := 0; j < WORLD_HEIGHT; j+=1 {
-            #partial switch building in s.buildings[i][j] {
-                case Drill:
-                    drill_pos: Vec2i = {i, j}
-                    _, err = os.write(file, (cast(^[size_of(Vec2i)]byte) &drill_pos)^[:])
-                    if err != nil {
-                        fmt.println("Can not save drill pos: ", err)
-                        return
-                    }
-                    
-                    ores_length := len(building.ores)
-                    _, err = os.write(file, (cast(^[size_of(ores_length)]byte) &ores_length)^[:])
-                    if err != nil {
-                        fmt.println("Can not save ores length: ", err)
-                        return
-                    }
+    for i := 0; i < WORLD_WIDTH; i += 1 {
+        for j := 0; j < WORLD_HEIGHT; j += 1 {
+            if drill, ok := s.buildings[i][j].(Drill); ok {
+                _, err = os.write(file, mem.ptr_to_bytes(&Vec2i{i, j}))
+                if err != nil {
+                    nucoib_errln("Can not save drill pos: %v", err)
+                    return
+                }
+                
+                ores_length := len(drill.ores)
+                _, err = os.write(file, mem.ptr_to_bytes(&ores_length))
+                if err != nil {
+                    nucoib_errln("Can not save ores length: %v", err)
+                    return
+                }
 
-                    if ores_length != 0 {
-                        _, err = os.write(file, (cast([^]byte) (cast(^u8) &building.ores[0]))[:ores_length*size_of(Ore)])
-                        if err != nil {
-                            fmt.println("Can not save ores array: ", err)
-                            return
-                        }
-                    } 
+                if ores_length != 0 {
+                    _, err = os.write(file, mem.slice_to_bytes(drill.ores[:]))
+                    if err != nil {
+                        nucoib_errln("Can not save ores array: %v", err)
+                        return
+                    }
+                } 
             }
         }
     }
 }
 
 load :: proc() {
-    file, err := os.open("save.bin", os.O_RDONLY)
+    file, err := os.open(SAVE_FILE_NAME, os.O_RDONLY)
     defer os.close(file) 
     
     if err != nil {
-        fmt.println("Can not open file: ", err)
+        nucoib_errln("Can not open file: %v", err)
         return
     }
     
-    os.read(file, (cast(^[size_of(Player)]byte) &s.player)^[:])
-    os.read(file, (cast(^[size_of(World)]byte) &s.world[0][0])^[:])
-    os.read(file, (cast(^[size_of(Buildings)]byte) &s.buildings[0][0])^[:])
+    os.read(file, mem.ptr_to_bytes(&s.player))
+    os.read(file, mem.ptr_to_bytes(&s.world[0][0], WORLD_WIDTH * WORLD_HEIGHT))
+    os.read(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT))
     
     for {
         drill_pos: Vec2i
-        _, err = os.read(file, (cast(^[size_of(drill_pos)]byte) &drill_pos)^[:])
-        if err == os.ERROR_EOF do break
+        n, err := os.read(file, mem.ptr_to_bytes(&drill_pos))
+        if err == os.ERROR_EOF || n == 0 do break
         if err != nil {
-            fmt.println("Can not read drill pos: ", err)
+            nucoib_errln("Can not read drill pos: %v", err)
             return
         }
        
         drill := &s.buildings[drill_pos.x][drill_pos.y].(Drill)
         drill.ores = {}
-        ores_length: int
         
-        _, err = os.read(file, (cast(^[size_of(ores_length)]byte) &ores_length)^[:])
+        ores_length: int
+        _, err = os.read(file, mem.ptr_to_bytes(&ores_length))
         if err != nil {
-            fmt.println("Can not read ores length: ", err)
+            nucoib_errln("Can not read ores length: %v", err)
             return
         }
 
         if ores_length != 0 {
-            reserve(&drill.ores, ores_length)
             resize(&drill.ores, ores_length)
-            _, err = os.read(file, (cast([^]byte) (cast(^u8) &drill.ores[0]))[:ores_length*size_of(Ore)])
+            _, err = os.read(file, mem.slice_to_bytes(drill.ores[:]))
             if err != nil {
-                fmt.println("Can not read ores array: ", err)
+                nucoib_errln("Can not read ores array: %v", err)
                 return
             }
         }
@@ -237,8 +236,8 @@ load :: proc() {
 }
 
 cluster_generation :: proc(tile: OreType) {
-    count_useless := 0
-    count_usefull := 0
+    visited_count := 0
+    generated_count := 0
     cx := rand.int_max(WORLD_WIDTH)
     cy := rand.int_max(WORLD_HEIGHT)
 
@@ -252,15 +251,11 @@ cluster_generation :: proc(tile: OreType) {
         if slice.contains(visited[:], ci) do continue
         append(&visited, ci)
         
-        // y = -x/10+1
         r := rand.float32()
-        y := -f32(count_useless) / CLUSTER_SIZE + 1
-        count_useless += 1
+        y := -f32(visited_count) / CLUSTER_SIZE + 1
+        visited_count += 1
         if r >= y do continue
 
-        // y = -log(x/10)
-        // if rand.float32() >= -math.log10(f32(count_useless)/CLUSTER_SIZE) do continue      
-        
         if ci.x - 1 != -1 {
             queue.push_back(&tovisit, Vec2i{ci.x-1, ci.y})
         }
@@ -273,19 +268,19 @@ cluster_generation :: proc(tile: OreType) {
         if ci.y + 1 != WORLD_HEIGHT {
             queue.push_back(&tovisit, Vec2i{ci.x, ci.y+1})
         }
-        min := int(y * MIN_ORE_COUNT)
-        max := int(y * MAX_ORE_COUNT)
-        count := rand.int_max(max - min) + min
 
-        if tile == .None {
-            s.world[ci.x][ci.y] = {tile, 0}
-        } else {
-            s.world[ci.x][ci.y] = {tile, count}
+        count := 0
+        if tile != .None {
+            min := int(y * MIN_ORE_COUNT)
+            max := int(y * MAX_ORE_COUNT)
+            count = rand.int_max(max - min) + min
         }
-        count_usefull += 1
+
+        s.world[ci.x][ci.y] = {tile, count}
+        generated_count += 1
     }
     
-    s.count_clusters_sizes[count_usefull] += 1
+    s.count_clusters_sizes[generated_count] += 1
     delete(visited)
     queue.destroy(&tovisit)
 }
@@ -298,6 +293,12 @@ grid_size :: proc() -> (int, int) {
 }
 
 input :: proc(dt: f32) {
+    if rl.IsWindowResized() {
+        s.window_width = rl.GetScreenWidth()
+        s.window_height = rl.GetScreenHeight()
+        s.grid_rows, s.grid_cols = grid_size()
+    }
+
     if s.pressed_move > 0 {
         s.pressed_move -= dt
     } else {
@@ -317,11 +318,11 @@ input :: proc(dt: f32) {
     }
     
     if rl.IsKeyPressed(rl.KeyboardKey.MINUS) {
-        s.scale = max(MIN_SCALE, s.scale*0.9)
+        s.scale = max(MIN_SCALE, 0.9 * s.scale)
         s.grid_rows, s.grid_cols = grid_size()
     }
     if rl.IsKeyPressed(rl.KeyboardKey.EQUAL) {
-        s.scale = min(s.scale*1.1, MAX_SCALE)
+        s.scale = min(1.1 * s.scale, MAX_SCALE)
         s.grid_rows, s.grid_cols = grid_size()
     }
     
@@ -365,10 +366,10 @@ input :: proc(dt: f32) {
     if rl.IsKeyDown(rl.KeyboardKey.X) {
         delete_building(s.player.pos)        
     }
-    if rl.IsKeyDown(rl.KeyboardKey.SPACE) {
-        if s.pressed_dig > 0 {
-            s.pressed_dig -= dt
-        } else {
+    if s.pressed_dig > 0 {
+        s.pressed_dig -= dt
+    } else {
+        if rl.IsKeyDown(rl.KeyboardKey.SPACE) {
             current_tile := &s.world[s.player.pos.x][s.player.pos.y]
             if current_tile.type != .None {
                 s.base.ores[current_tile.type] += 1
@@ -381,12 +382,12 @@ input :: proc(dt: f32) {
     if rl.IsKeyPressed(rl.KeyboardKey.F5) {
         time := rl.GetTime()
         save()
-        fmt.printfln("Saved in %.6vs", rl.GetTime()-time)
+        nucoib_logln("Saved in %.6vs", rl.GetTime() - time)
     }
     if rl.IsKeyPressed(rl.KeyboardKey.F9) {
         time := rl.GetTime()
         load()        
-        fmt.printfln("Loaded in %.6vs", rl.GetTime()-time)
+        nucoib_logln("Loaded in %.6vs", rl.GetTime() - time)
     }
 }
 
@@ -396,24 +397,23 @@ update :: proc(dt: f32) {
             switch &building in s.buildings[i][j] {
                 case nil:
                 case Drill: 
-                    next_ore := &s.world[i + building.next_tile % 2][j + building.next_tile / 2]
+                    next_ore := &s.world[i + int(building.next_tile) % 2][j + int(building.next_tile) / 2]
                     
                     if building.drilling_timer >= DRILLING_TIME {
-                        if drill_ore_count(building) < building.capacity {
+                        if drill_ore_count(building) < int(building.capacity) {
                             if next_ore.type != .None {
-                                if len(building.ores) != 0 && building.ores[len(building.ores) - 1].type == next_ore.type {
-                                    building.ores[len(building.ores) - 1].count += 1
+                                ores := building.ores[:]
+                                if !slice.is_empty(ores) && slice.last(ores).type == next_ore.type {
+                                    slice.last_ptr(ores).count += 1
                                 } else {
                                     append(&building.ores, Ore{next_ore.type, 1})
                                 }
                                 
                                 next_ore.count -= 1
-                                if next_ore.count <= 0 {
-                                    next_ore^ = {}
-                                }
-                            } 
+                                if next_ore.count <= 0 do next_ore^ = {}
+                            }
                             building.next_tile = (building.next_tile + 1) % 4
-                        } 
+                        }
                         building.drilling_timer = 0
                     }
                     building.drilling_timer += dt
@@ -449,7 +449,7 @@ update :: proc(dt: f32) {
                     if building.ore_type == .None do continue
                     
                     building.transportation_progress += dt * TRANSPORTATION_SPEED
-                    next_pos := Vec2i{i, j} + offsets[building.direction]
+                    next_pos := offsets[building.direction] + {i, j}
                     max_progress: f32 = 1
                     
                     if check_boundaries(next_pos) { 
@@ -505,7 +505,7 @@ drill_ore_count :: proc(drill: Drill) -> int {
     return count
 }
 
-string_building :: proc(building: BuildingTile) -> string {
+string_building :: proc(building: Building) -> string {
     switch build in building {
         case Drill:    
             if len(build.ores) == 0 {
@@ -517,7 +517,7 @@ string_building :: proc(building: BuildingTile) -> string {
         case Conveyor: return tbprintf("Conveyor_%v[%v]", build.direction, build.ore_type)
         case Base:     return tbprintf("Base")
         case Part:     return string_building(s.buildings[build.main_pos.x][build.main_pos.y])  
-        case:          panic(fmt.aprintf("Unknown building type %v", build))
+        case:          nucoib_panic("Unknown building type %v", build)
     }
 }
 
@@ -525,10 +525,10 @@ delete_building :: proc(pos: Vec2i) {
     switch building in s.buildings[pos.x][pos.y] {
         case nil:
         case Drill:
-            s.buildings[pos.x+0][pos.y+0] = {}
-            s.buildings[pos.x+1][pos.y+0] = {}
-            s.buildings[pos.x+1][pos.y+1] = {}
-            s.buildings[pos.x+0][pos.y+1] = {}
+            s.buildings[pos.x + 0][pos.y + 0] = {}
+            s.buildings[pos.x + 1][pos.y + 0] = {}
+            s.buildings[pos.x + 1][pos.y + 1] = {}
+            s.buildings[pos.x + 0][pos.y + 1] = {}
         case Conveyor:
             s.buildings[pos.x][pos.y] = {}
         case Base:
@@ -555,7 +555,7 @@ draw :: proc() {
                 case .Iron:     ch_ore = 'I'
                 case .Tungsten: ch_ore = 'T'
                 case .Coal:     ch_ore = 'C'
-                case: panic(fmt.aprintf("Unknown ore type: %v", s.world[i][j]))
+                case: nucoib_panic("Unknown ore type: %v", s.world[i][j])
             }
             
             pos := rl.Vector2 {
@@ -619,9 +619,9 @@ draw :: proc() {
                 case Drill: 
                     draw_char('D', pos + 0.375*{s.char_width, s.char_height} * s.scale, 1.25*s.scale, rl.MAGENTA)
                     switch building.direction {
-                        case .Right: draw_char('>',   pos + 0.5*{s.char_width * 2.2, s.char_height} * s.scale, s.scale)
+                        case .Right: draw_char('>', pos + 0.5*{s.char_width * 2.2, s.char_height} * s.scale, s.scale)
                         case .Down:  draw_char('~' + 1, pos + 0.5*{s.char_width, s.char_height * 2.1} * s.scale, s.scale)
-                        case .Left:  draw_char('<',   pos + 0.5*{s.char_width * -0.2, s.char_height} * s.scale, s.scale)
+                        case .Left:  draw_char('<', pos + 0.5*{s.char_width * -0.2, s.char_height} * s.scale, s.scale)
                         case .Up:    draw_char('~' + 2, pos + 0.5*{s.char_width, s.char_height * -0.1} * s.scale, s.scale)
                     }
                 case Conveyor:
@@ -680,7 +680,7 @@ draw :: proc() {
                     case .Iron:     c = 'I'
                     case .Tungsten: c = 'T'
                     case .Coal:     c = 'C'
-                    case: panic(fmt.aprintf("Unknown ore type: %v", conveyor.ore_type))
+                    case: nucoib_panic("Unknown ore type: %v", conveyor.ore_type)
                 }
 
                 draw_char(c, ore_offset, s.scale * ORE_SCALE, rl.GOLD)
@@ -732,7 +732,7 @@ draw :: proc() {
     base_menu_height := int(max(OreType)) + 3
     
     if s.grid_cols > base_menu_width && s.grid_rows > base_menu_height && s.base_menu {
-        draw_border(s.grid_cols-base_menu_width, 0, base_menu_width, base_menu_height, BG_COLOR, fill = .All)
+        draw_border(s.grid_cols - base_menu_width, 0, base_menu_width, base_menu_height, BG_COLOR, fill = .All)
         for str, i in str_arr {
             pos := rl.Vector2 {
                 f32(s.grid_cols - str_length - 1) * s.char_width,
@@ -759,16 +759,16 @@ draw :: proc() {
     if s.grid_rows > STOOD_MENU_HEIGHT && s.grid_cols > stood_menu_width && s.stood_menu {
         // Ore text
         draw_border(0, 0, stood_menu_width, STOOD_MENU_HEIGHT, BG_COLOR, fill = .All)
-        draw_text(text_stood_menu, {s.char_width, s.char_height*1} * s.scale, s.scale)
-        draw_text(text_ore,        {s.char_width, s.char_height*2} * s.scale, s.scale)
-        draw_text(text_building,   {s.char_width, s.char_height*3} * s.scale, s.scale)
+        draw_text(text_stood_menu, {s.char_width, s.char_height * 1} * s.scale, s.scale)
+        draw_text(text_ore,        {s.char_width, s.char_height * 2} * s.scale, s.scale)
+        draw_text(text_building,   {s.char_width, s.char_height * 3} * s.scale, s.scale)
     }
 
     // DrawFPS
     fps_text := tbprintf("%v", rl.GetFPS())
-    fps_menu_width := len(tbprintf(fps_text)) + 2
+    fps_menu_width := len(fps_text) + 2
     if s.grid_rows > FPS_MENU_HEIGHT && s.grid_cols > fps_menu_width && s.fps_menu {
-        draw_border(0, s.grid_rows-FPS_MENU_HEIGHT, fps_menu_width, FPS_MENU_HEIGHT, BG_COLOR, fill = .All)
+        draw_border(0, s.grid_rows - FPS_MENU_HEIGHT, fps_menu_width, FPS_MENU_HEIGHT, BG_COLOR, fill = .All)
         draw_text(fps_text, {1, f32(s.grid_rows) - 2} * {s.char_width, s.char_height} * s.scale, s.scale )
     }
 }
@@ -811,7 +811,7 @@ draw_border :: proc(x, y, w, h: int, bg_color: rl.Color = {}, fg_color: rl.Color
         
         dest = rl.Rectangle {
             x = f32(x) * s.char_width * s.scale,
-            y = (f32(y) + f32(h) - 1)* s.char_height * s.scale,
+            y = (f32(y) + f32(h) - 1) * s.char_height * s.scale,
             width = f32(w) * s.char_width * s.scale,
             height = s.char_height * s.scale,
         }
@@ -869,7 +869,7 @@ clear_temp_buffer :: proc() {
 }
 
 tbprintf :: proc(str: string, args: ..any) -> string {
-    stream := io.Stream {procedure = tbprintf_callback}
+    stream := io.Stream{procedure = tbprintf_callback}
     begin := s.temp_buffer_length
     fmt.wprintf(stream, str, ..args, flush = false)
     return string(s.temp_buffer[begin:s.temp_buffer_length])
@@ -882,9 +882,35 @@ tbprintf_callback :: proc(stream_data: rawptr, mode: io.Stream_Mode, p: []u8, of
             copy(s.temp_buffer[s.temp_buffer_length:], p)
             s.temp_buffer_length += len(p)
             n = i64(len(p))
-        case: fmt.panicf("Not supported mode: %v", mode)
+        case: nucoib_panic("Not supported mode: %v", mode)
     }
     return
+}
+
+nucoib_log :: proc(str: string, args: ..any) {
+    fmt.print("[LOG]: ")
+    fmt.printf(str, ..args)
+}
+
+nucoib_logln :: proc(str: string, args: ..any) {
+    fmt.print("[LOG]: ")
+    fmt.printfln(str, ..args)
+}
+
+nucoib_err :: proc(str: string, args: ..any) {
+    fmt.eprint("[ERROR]: ")
+    fmt.eprintf(str, ..args)
+}
+
+nucoib_errln :: proc(str: string, args: ..any) {
+    fmt.eprint("[ERROR]: ")
+    fmt.eprintfln(str, ..args)
+}
+
+nucoib_panic :: proc(str: string, args: ..any, loc := #caller_location) -> ! {
+    fmt.eprintf("[PANIC]: %v: ", loc)
+    fmt.eprintfln(str, ..args)
+    intrinsics.trap()
 }
 
 main :: proc() {
@@ -893,18 +919,23 @@ main :: proc() {
     rl.SetTargetFPS(60)
     
     err: runtime.Allocator_Error
-    s.world, err = new(World)
+    s.world, err = new(Ores)
     if err != nil {
-        fmt.println("Buy MORE RAM! --> ", err)
-        fmt.println("Need memory: ", size_of(World), "Bytes")
+        nucoib_errln("Buy MORE RAM! --> %v", err)
+        nucoib_errln("Need memory: %v bytes", size_of(Ores))
     }
     s.buildings, err = new(Buildings)
     if err != nil {
-        fmt.println("Buy MORE RAM! --> ", err)
-        fmt.println("Need memory: ", size_of(Buildings), "Bytes")
+        nucoib_errln("Buy MORE RAM! --> %v", err)
+        nucoib_errln("Need memory: %v bytes", size_of(Buildings))
     }
     
-    fmt.println("Map size: ", size_of(World) + size_of(Buildings), "Bytes")
+    total_size := f64(size_of(Ores) + size_of(Buildings)) / 1e6
+    world_size := f64(size_of(Ores)) / 1e6
+    buildings_size := f64(size_of(Buildings)) / 1e6
+    nucoib_logln("Map size: %v Mb", total_size)
+    nucoib_logln("  - Ores: %v Mb (%.2v%%)", world_size, world_size / total_size * 100)
+    nucoib_logln("  - Buildings: %v Mb (%.2v%%)", buildings_size, buildings_size / total_size * 100)
     
     s.font_texture = rl.LoadTexture("./atlas.png")
     s.char_width = f32(int(s.font_texture.width) / ATLAS_COLS)
@@ -936,13 +967,6 @@ main :: proc() {
     
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
-        
-        if rl.IsWindowResized() {
-            s.window_width = rl.GetScreenWidth()
-            s.window_height = rl.GetScreenHeight()
-
-            s.grid_rows, s.grid_cols = grid_size()
-        }
         
         dt := rl.GetFrameTime()
         
