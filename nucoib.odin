@@ -78,6 +78,7 @@ OreType :: enum u8 {
     Iron,
     Tungsten,
     Coal,
+    Copper,
 }
 
 Ore :: struct {
@@ -292,6 +293,18 @@ grid_size :: proc() -> (int, int) {
     return grid_rows, grid_cols
 }
 
+get_resources :: proc(ores: []Ore) -> bool {
+    for ore in ores {
+        if s.base.ores[ore.type] >= ore.count {
+            s.base.ores[ore.type] -= ore.count
+            continue
+        }      
+        return false
+    }
+    
+    return true
+}
+
 input :: proc(dt: f32) {
     if rl.IsWindowResized() {
         s.window_width = rl.GetScreenWidth()
@@ -327,7 +340,7 @@ input :: proc(dt: f32) {
     }
     
     drill: if rl.IsKeyDown(rl.KeyboardKey.D) {
-        if check_boundaries(s.player.pos + 1) {
+        if check_boundaries(s.player.pos + 1) && get_resources({{.Iron, 5}}) {
             x := s.player.pos.x
             y := s.player.pos.y
             for i := x; i < x + 2; i += 1 {
@@ -357,9 +370,12 @@ input :: proc(dt: f32) {
     }
     if rl.IsKeyDown(rl.KeyboardKey.C) {
         building := &s.buildings[s.player.pos.x][s.player.pos.y]
-        conveyor, ok := building.(Conveyor)
+        conveyor, ok := &building.(Conveyor)
         
-        if (ok && conveyor.direction != s.direction) || building^ == nil { 
+        if (ok && conveyor.direction != s.direction) { 
+            conveyor.direction = s.direction
+        }
+        if building^ == nil && get_resources({{.Copper, 1}}) {
             building^ = Conveyor{direction = s.direction}
         }
     }
@@ -554,7 +570,8 @@ draw :: proc() {
                 case .None:     continue
                 case .Iron:     ch_ore = 'I'
                 case .Tungsten: ch_ore = 'T'
-                case .Coal:     ch_ore = 'C'
+                case .Coal:     ch_ore = 'c'
+                case .Copper:   ch_ore = 'C'
                 case: nucoib_panic("Unknown ore type: %v", s.world[i][j])
             }
             
@@ -676,10 +693,12 @@ draw :: proc() {
 
                 ore_offset += pos
                 c: u8
-                #partial switch conveyor.ore_type {
+                switch conveyor.ore_type {
                     case .Iron:     c = 'I'
                     case .Tungsten: c = 'T'
-                    case .Coal:     c = 'C'
+                    case .Coal:     c = 'c'
+                    case .Copper:   c = 'C'
+                    case .None:
                     case: nucoib_panic("Unknown ore type: %v", conveyor.ore_type)
                 }
 
