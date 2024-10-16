@@ -152,89 +152,61 @@ opposite := [Direction]Direction {
     .Up    = .Down,
 }
 
-save :: proc() {
+@(require_results)
+write_save :: proc() -> os.Error {
     _ = os.remove(SAVE_FILE_NAME)
-    file, err := os.open(SAVE_FILE_NAME, os.O_CREATE | os.O_WRONLY, 0o666)
+    file := os.open(SAVE_FILE_NAME, os.O_CREATE | os.O_WRONLY, 0o666) or_return
     defer os.close(file) 
     
-    if err != nil {
-        nucoib_errln("Can not open file: %v", err)
-        return
-    }
-    
-    os.write(file, mem.ptr_to_bytes(&s.player))
-    os.write(file, mem.ptr_to_bytes(&s.world[0][0], WORLD_WIDTH * WORLD_HEIGHT))
-    os.write(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT))
+    os.write(file, mem.ptr_to_bytes(&s.player)) or_return
+    os.write(file, mem.ptr_to_bytes(&s.ores[0][0], WORLD_WIDTH * WORLD_HEIGHT)) or_return
+    os.write(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT)) or_return
     
     for i := 0; i < WORLD_WIDTH; i += 1 {
         for j := 0; j < WORLD_HEIGHT; j += 1 {
             if drill, ok := s.buildings[i][j].(Drill); ok {
-                _, err = os.write(file, mem.ptr_to_bytes(&Vec2i{i, j}))
-                if err != nil {
-                    nucoib_errln("Can not save drill pos: %v", err)
-                    return
-                }
+                os.write(file, mem.ptr_to_bytes(&Vec2i{i, j})) or_return
                 
                 ores_length := len(drill.ores)
-                _, err = os.write(file, mem.ptr_to_bytes(&ores_length))
-                if err != nil {
-                    nucoib_errln("Can not save ores length: %v", err)
-                    return
-                }
+                os.write(file, mem.ptr_to_bytes(&ores_length)) or_return
 
                 if ores_length != 0 {
-                    _, err = os.write(file, mem.slice_to_bytes(drill.ores[:]))
-                    if err != nil {
-                        nucoib_errln("Can not save ores array: %v", err)
-                        return
-                    }
+                    os.write(file, mem.slice_to_bytes(drill.ores[:])) or_return
                 } 
             }
         }
     }
+    return nil
 }
 
-load :: proc() {
-    file, err := os.open(SAVE_FILE_NAME, os.O_RDONLY)
+@(require_results)
+read_save :: proc() -> os.Error {
+    file := os.open(SAVE_FILE_NAME, os.O_RDONLY) or_return
     defer os.close(file) 
     
-    if err != nil {
-        nucoib_errln("Can not open file: %v", err)
-        return
-    }
-    
-    os.read(file, mem.ptr_to_bytes(&s.player))
-    os.read(file, mem.ptr_to_bytes(&s.world[0][0], WORLD_WIDTH * WORLD_HEIGHT))
-    os.read(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT))
+    os.read(file, mem.ptr_to_bytes(&s.player)) or_return
+    os.read(file, mem.ptr_to_bytes(&s.ores[0][0], WORLD_WIDTH * WORLD_HEIGHT)) or_return
+    os.read(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT)) or_return
     
     for {
         drill_pos: Vec2i
         n, err := os.read(file, mem.ptr_to_bytes(&drill_pos))
         if err == os.ERROR_EOF || n == 0 do break
-        if err != nil {
-            nucoib_errln("Can not read drill pos: %v", err)
-            return
-        }
+        if err != nil do return err
        
-        drill := &s.buildings[drill_pos.x][drill_pos.y].(Drill)
+        drill := &building_ptr_at(drill_pos).(Drill)
         drill.ores = {}
         
         ores_length: int
-        _, err = os.read(file, mem.ptr_to_bytes(&ores_length))
-        if err != nil {
-            nucoib_errln("Can not read ores length: %v", err)
-            return
-        }
+        _ = os.read(file, mem.ptr_to_bytes(&ores_length)) or_return
 
         if ores_length != 0 {
             resize(&drill.ores, ores_length)
-            _, err = os.read(file, mem.slice_to_bytes(drill.ores[:]))
-            if err != nil {
-                nucoib_errln("Can not read ores array: %v", err)
-                return
-            }
+            _ = os.read(file, mem.slice_to_bytes(drill.ores[:])) or_return
         }
     }
+
+    return nil
 }
 
 cluster_generation :: proc(tile: OreType) {
@@ -412,13 +384,21 @@ input :: proc(dt: f32) {
     }
     if rl.IsKeyPressed(rl.KeyboardKey.F5) {
         time := rl.GetTime()
-        save()
-        nucoib_logln("Saved in %.6vs", rl.GetTime() - time)
+        err := write_save()
+        if err != nil {
+            nucoib_errorfln("Cannot write save file: %v", err)
+        } else {
+            nucoib_logfln("Saved in %.6vs", rl.GetTime() - time)
+        }
     }
     if rl.IsKeyPressed(rl.KeyboardKey.F9) {
         time := rl.GetTime()
-        load()        
-        nucoib_logln("Loaded in %.6vs", rl.GetTime() - time)
+        err := read_save()
+        if err != nil {
+            nucoib_errorfln("Cannot read save file: %v", err)
+        } else {
+            nucoib_logfln("Loaded in %.6vs", rl.GetTime() - time)
+        }
     }
 }
 
