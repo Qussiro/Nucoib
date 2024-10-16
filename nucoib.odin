@@ -353,20 +353,21 @@ input :: proc(dt: f32) {
         s.grid_rows, s.grid_cols = grid_size()
     }
     
-    drill: if rl.IsKeyDown(rl.KeyboardKey.D) && try_build(Drill) {
+    drill: if rl.IsKeyDown(rl.KeyboardKey.D) {
         if check_boundaries(s.player.pos + 1) {
             x := s.player.pos.x
             y := s.player.pos.y
             for i := x; i < x + 2; i += 1 {
                 for j := y; j < y + 2; j += 1 {
-                     if s.buildings[i][j] != nil  do break drill
+                     if s.buildings[i][j] != nil do break drill
                 }
-            } 
-            
-            s.buildings[x + 1][y + 0] = Part{s.player.pos}
-            s.buildings[x + 1][y + 1] = Part{s.player.pos}
-            s.buildings[x + 0][y + 1] = Part{s.player.pos}
-            s.buildings[x + 0][y + 0] = Drill{capacity = 20, direction = s.direction}
+            }
+            if try_build(Drill) {
+                s.buildings[x + 1][y + 0] = Part{s.player.pos}
+                s.buildings[x + 1][y + 1] = Part{s.player.pos}
+                s.buildings[x + 0][y + 1] = Part{s.player.pos}
+                s.buildings[x + 0][y + 0] = Drill{capacity = 20, direction = s.direction}
+            }
         }
     }
     
