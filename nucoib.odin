@@ -294,9 +294,8 @@ grid_size :: proc() -> (int, int) {
     return grid_rows, grid_cols
 }
 
-try_build :: proc($B: typeid) -> bool where intrinsics.type_is_variant_of(Building, B) {
+try_build :: proc(B: typeid) -> bool {
     ores := get_resources(B)
-    
     for ore in ores {
         if s.base.ores[ore.type] >= ore.count {
             s.base.ores[ore.type] -= ore.count
@@ -304,20 +303,20 @@ try_build :: proc($B: typeid) -> bool where intrinsics.type_is_variant_of(Buildi
         }      
         return false
     }
-    
     return true
 }
 
-get_resources :: proc($B: typeid) -> []Ore where intrinsics.type_is_variant_of(Building, B) {
-    if B == Drill {
-        @(static) ores := []Ore{{.Iron, 5}}
-        return ores
-    } 
-    if B == Conveyor {
-        @(static) ores := []Ore{{.Copper, 1}}
-        return ores
-    } 
-    nucoib_panic("Couldn't get resources from building: %v", typeid_of(B))
+get_resources :: proc(B: typeid) -> []Ore {
+    switch B {
+        case Drill:
+            @(static) ores := []Ore{{.Iron, 5}}
+            return ores
+        case Conveyor:
+            @(static) ores := []Ore{{.Copper, 1}}
+            return ores
+        case:
+            nucoib_panic("Couldn't get resources from building: %v", B)
+    }
 }
 
 input :: proc(dt: f32) {
