@@ -14,10 +14,12 @@ import rl "vendor:raylib"
 ATLAS_COLS             :: 18
 ATLAS_ROWS             :: 7
 STOOD_MENU_HEIGHT      :: 5
-DIRECTION_MENU_HEIGHT  :: 3
 DIRECTION_MENU_WIDTH   :: 3
-FPS_MENU_HEIGHT        :: 3
+DIRECTION_MENU_HEIGHT  :: 3
 FPS_MENU_WIDTH         :: 4
+FPS_MENU_HEIGHT        :: 3
+SLOT_MENU_WIDTH        :: 7
+SLOT_MENU_HEIGHT       :: 7
 WORLD_WIDTH            :: 1000
 WORLD_HEIGHT           :: 1000
 CLUSTER_SIZE           :: 100
@@ -97,6 +99,21 @@ Direction :: enum u8 {
    Up, 
 }
 
+ListConf :: struct {
+    pos:      Vec2i,
+    w:        int,
+    h:        int,
+    bg_color: rl.Color,
+    fg_color: rl.Color,
+    title:    string,
+    content:  []ListElement,
+}
+
+ListElement :: struct {
+    text:    string,
+    reverse: bool,
+}
+
 State :: struct {
     ores:                 ^Ores,
     buildings:            ^Buildings,
@@ -112,6 +129,8 @@ State :: struct {
     stood_menu:           bool,
     base_menu:            bool,
     fps_menu:             bool,
+    use_menu:             bool,
+    selected_drill:       ^Drill,
     count_clusters_sizes: [CLUSTER_SIZE + 1]int,
     temp_buffer:          [512]u8,
     temp_buffer_length:   int,
@@ -301,15 +320,19 @@ input :: proc(dt: f32) {
     } else {
         if rl.IsKeyDown(rl.KeyboardKey.RIGHT) && s.player.pos.x < WORLD_WIDTH - 1 {
             s.player.pos.x += 1
+            s.use_menu = false
         }
         if rl.IsKeyDown(rl.KeyboardKey.DOWN) && s.player.pos.y < WORLD_HEIGHT - 1 {
             s.player.pos.y += 1
+            s.use_menu = false
         }  
         if rl.IsKeyDown(rl.KeyboardKey.LEFT) && s.player.pos.x > 0 {
             s.player.pos.x -= 1 
+            s.use_menu = false
         }
         if rl.IsKeyDown(rl.KeyboardKey.UP) && s.player.pos.y > 0 {
             s.player.pos.y -= 1
+            s.use_menu = false
         }
         s.pressed_move = MOVE_COOLDOWN      
     }
@@ -352,6 +375,25 @@ input :: proc(dt: f32) {
     }
     if rl.IsKeyPressed(rl.KeyboardKey.F1) {
         s.fps_menu = !s.fps_menu
+    }
+    if rl.IsKeyPressed(rl.KeyboardKey.U)  {
+        if s.use_menu {
+            s.use_menu = false
+        } else {
+            #partial switch &building in building_ptr_at(s.player.pos) 
+            {
+                case Drill:
+                    s.selected_drill = &building
+                    s.use_menu = !s.use_menu
+                case Part:
+                    drill, ok := &building_ptr_at(building.main_pos).(Drill) 
+                    if ok {
+                        s.selected_drill = drill
+                        s.use_menu = !s.use_menu
+                    }
+                case:
+            }
+        }
     }
     if rl.IsKeyDown(rl.KeyboardKey.C) {
         building := building_ptr_at(s.player.pos)
@@ -688,7 +730,7 @@ draw :: proc() {
     }
     
     // RAMKA he is right
-    draw_border(0, 0, s.grid_cols, s.grid_rows, BG_COLOR)
+    draw_border({0, 0}, s.grid_cols, s.grid_rows, BG_COLOR)
 
     // Direction menu 
     if s.grid_cols > DIRECTION_MENU_WIDTH && s.grid_rows > DIRECTION_MENU_HEIGHT {
@@ -706,28 +748,57 @@ draw :: proc() {
     clear_temp_buffer()
     
     // Base menu
-    str_arr: [OreType]string 
+    elements: [int(max(OreType))+1]ListElement 
     for ore_tile in OreType {
-        str_arr[ore_tile] = tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile])
+        elements[ore_tile] = {tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile]), false}
     }
+    
     str_length: int
-    for str in str_arr {
-        if len(str) > str_length do str_length = len(str)
+    for element in elements {
+        if len(element.text) > str_length do str_length = len(element.text)
     }
 
     base_menu_width := str_length + 2
     base_menu_height := int(max(OreType)) + 3
     
     if s.grid_cols > base_menu_width && s.grid_rows > base_menu_height && s.base_menu {
-        draw_border(s.grid_cols - base_menu_width, 0, base_menu_width, base_menu_height, BG_COLOR, fill = true)
-        for str, i in str_arr {
-            pos := grid_to_screen({s.grid_cols - str_length - 1, int(i) + 1})
-            draw_text(str, pos)
+        conf := ListConf{
+            {s.grid_cols - base_menu_width, 0},
+            base_menu_width, 
+            base_menu_height, 
+            BG_COLOR, 
+            rl.WHITE, 
+            "MAIN",
+            elements[:],
         }
+        draw_list(conf)
+    }
+
+    use_menu_width := base_menu_width + SLOT_MENU_WIDTH
+    // Use menu
+    if s.use_menu {
+        right_menu_pos := Vec2i{s.grid_cols/2 - use_menu_width/2 + base_menu_width, s.grid_rows/2 - SLOT_MENU_HEIGHT/2}
+        draw_border(right_menu_pos, SLOT_MENU_WIDTH/2, SLOT_MENU_HEIGHT, BG_COLOR, fill = true, title = "USE")
+        
+        slot_pos := right_menu_pos + {SLOT_MENU_WIDTH/2, SLOT_MENU_HEIGHT/2} - 1
+        draw_border(slot_pos, 3, 3, BG_COLOR, fill = true)
+        draw_text("000", grid_to_screen(slot_pos + {0,3}))
+        
+        conf := ListConf{
+            {s.grid_cols/2 - use_menu_width/2, s.grid_rows/2 - SLOT_MENU_HEIGHT/2},
+            base_menu_width, 
+            base_menu_height, 
+            BG_COLOR, 
+            rl.WHITE, 
+            "STORAGE",
+            elements[:],
+        }
+        draw_list(conf)
+        
+        
     }
     
     // Stood menu
-    text_stood_menu := "STOOD ON:"
     text_building := building_to_string(building_at(s.player.pos)) 
 
     text_ore: string
@@ -738,14 +809,13 @@ draw :: proc() {
         case: 
             text_ore = tbprintf("%v: %v", ore.type, ore.count)
     }
-    stood_menu_width := max(len(text_stood_menu), len(text_building), len(text_ore)) + 2
+    stood_menu_width := max(len(text_building), len(text_ore)) + 2
     
     if s.grid_rows > STOOD_MENU_HEIGHT && s.grid_cols > stood_menu_width && s.stood_menu {
         // Ore text
-        draw_border(0, 0, stood_menu_width, STOOD_MENU_HEIGHT, BG_COLOR, fill = true)
-        draw_text(text_stood_menu, {s.char_width, s.char_height * 1} * s.scale)
-        draw_text(text_ore,        {s.char_width, s.char_height * 2} * s.scale)
-        draw_text(text_building,   {s.char_width, s.char_height * 3} * s.scale)
+        draw_border(0, 0, stood_menu_width, STOOD_MENU_HEIGHT, BG_COLOR, fill = true, title = "STOOD-ON")
+        draw_text(text_ore,        {s.char_width, s.char_height * 1} * s.scale)
+        draw_text(text_building,   {s.char_width, s.char_height * 2} * s.scale)
     }
 
     // DrawFPS
@@ -756,22 +826,34 @@ draw :: proc() {
         pos := grid_to_screen({1, s.grid_rows - 2})
         draw_text(fps_text, pos)
     }
+
+    
 }
 
-draw_border :: proc(x, y, w, h: int, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, fill: bool = false) {
+draw_list :: proc(conf: ListConf) {
+    draw_border(conf.pos, conf.w, conf.h, conf.bg_color, conf.fg_color, true, conf.title)
+    for element, i in conf.content {
+        pos := grid_to_screen(conf.pos + {1, int(i) + 1})
+        draw_text(element.text, pos, reverse = element.reverse)
+    }
+}
+
+draw_border :: proc(pos: Vec2i, w, h: int, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, fill: bool = false, title: string = "") {
+    w := len(title) != 0 ? max(w, len(title)+4) : w
+    
     if fill == true {
         dest := rl.Rectangle {
-            x = f32(x) * s.char_width * s.scale,
-            y = f32(y) * s.char_height * s.scale,
+            x = f32(pos.x) * s.char_width * s.scale,
+            y = f32(pos.y) * s.char_height * s.scale,
             width = f32(w) * s.char_width * s.scale,
             height = f32(h) * s.char_height * s.scale,
         }
         rl.DrawTexturePro(s.font_texture, s.blank_texture_rec, dest, {}, 0, bg_color)
     }
-    for i := x; i < w + x; i += 1 {
-        upper_pos := grid_to_screen({i, y})
-        lower_pos := grid_to_screen({i, h + y - 1})
-        if (i == x || i == w + x - 1) {
+    for i := pos.x; i < w + pos.x; i += 1 {
+        upper_pos := grid_to_screen({i, pos.y})
+        lower_pos := grid_to_screen({i, h + pos.y - 1})
+        if (i == pos.x || i == w + pos.x - 1) {
             draw_char('+', upper_pos, s.scale, bg_color, fg_color)
             draw_char('+', lower_pos, s.scale, bg_color, fg_color)
         } else {
@@ -779,18 +861,21 @@ draw_border :: proc(x, y, w, h: int, bg_color: rl.Color = {}, fg_color: rl.Color
             draw_char('-', lower_pos, s.scale, bg_color, fg_color)
         }
     }
-    for i := y + 1; i < h + y - 1; i += 1 {
-        left_pos := grid_to_screen({x, i})
-        right_pos := grid_to_screen({w + x - 1, i})
+    for i := pos.y + 1; i < h + pos.y - 1; i += 1 {
+        left_pos := grid_to_screen({pos.x, i})
+        right_pos := grid_to_screen({w + pos.x - 1, i})
         draw_char('|', left_pos, s.scale, bg_color, fg_color)
         draw_char('|', right_pos, s.scale, bg_color, fg_color)
     }
+
+    title_pos := grid_to_screen({pos.x + w/2 - len(title)/2, pos.y})
+    draw_text(title, title_pos)
 }
 
-draw_text :: proc(text: string, pos: rl.Vector2, scale: f32 = s.scale) {
+draw_text :: proc(text: string, pos: rl.Vector2, scale: f32 = s.scale, reverse: bool = false) {
     for i := 0; i < len(text); i += 1 {
         char_pos := grid_to_screen({i, 0}) + pos
-        draw_char(text[i], char_pos, scale)
+        draw_char(text[i], char_pos, scale, reverse = reverse)
     }
 }
 
