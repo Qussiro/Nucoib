@@ -2,4 +2,4 @@
 
 set -x
 
-odin build . 2>&1 | cm
+./build.sh $1 2>&1 | cm
