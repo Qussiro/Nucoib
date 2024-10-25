@@ -1,6 +1,7 @@
 package nucoib
 
 import "core:fmt"
+import "core:math"
 import "core:math/rand"
 import "core:container/queue"
 import "core:slice"
@@ -95,6 +96,7 @@ OreType :: enum u8 {
 Panel :: struct {
     priority: int,
     rect:     Rect,
+    pos_percentege: rl.Vector2,
     anchor:   bit_set[Direction],
     active:   bool,
 }
@@ -305,10 +307,18 @@ cluster_generation :: proc(tile: OreType) {
 }
 
 
-grid_size :: proc() -> (int, int) {
+recalculate_grid_size :: proc() {
     grid_rows := int(f32(s.window_height) / (s.char_height * s.scale))
     grid_cols := int(f32(s.window_width) / (s.char_width * s.scale))
-    return grid_rows, grid_cols
+    
+    for &panel in s.panels {
+        panel.rect.pos.x = int(panel.pos_percentege.x * f32(grid_cols))
+        panel.rect.pos.y = int(panel.pos_percentege.y * f32(grid_rows))
+        rect_clamp(&panel.rect, {{0, 0}, {grid_cols, grid_rows}}) 
+    }
+    
+    s.grid_rows = grid_rows
+    s.grid_cols = grid_cols
 }
 
 try_build :: proc(B: typeid) -> bool {
@@ -340,10 +350,10 @@ input :: proc(dt: f32) {
     if rl.IsWindowResized() {
         s.window_width = rl.GetScreenWidth()
         s.window_height = rl.GetScreenHeight()
-        s.grid_rows, s.grid_cols = grid_size()
+        recalculate_grid_size()
     }
     
-    select: if s.pressed_move > 0 {
+    if s.pressed_move > 0 {
         s.pressed_move -= dt
     } else if s.panels[.Use].active == false {
         if rl.IsKeyDown(.RIGHT) && s.player.pos.x < WORLD_WIDTH - 1 {
@@ -359,8 +369,9 @@ input :: proc(dt: f32) {
             s.player.pos.y -= 1
         }
         s.pressed_move = MOVE_COOLDOWN      
-    } else {
-        if rl.IsKeyDown(.RIGHT) && s.selected_slot == 0 {
+    } 
+    select: if s.panels[.Use].active {
+        if rl.IsKeyPressed(.RIGHT) && s.selected_slot == 0 {
             ore := Ore{OreType(s.selected_ore), 0}
             if ore.type != .Coal do break select
             if s.selected_drill.fuel_slot == {} do s.selected_drill.fuel_slot = ore 
@@ -384,10 +395,10 @@ input :: proc(dt: f32) {
                 }
             }
         }
-        if rl.IsKeyDown(.DOWN) {
+        if rl.IsKeyPressed(.DOWN) {
             s.selected_ore = (s.selected_ore + 1) % len(OreType)
         }  
-        if rl.IsKeyDown(.LEFT) {
+        if rl.IsKeyPressed(.LEFT) {
             if s.selected_slot == 0 {
                 ore_type := s.selected_drill.fuel_slot.type
                 if s.selected_drill.fuel_slot.count > 0 {
@@ -413,23 +424,23 @@ input :: proc(dt: f32) {
                 }
             }
         }
-        if rl.IsKeyDown(.UP) {
+        if rl.IsKeyPressed(.UP) {
             s.selected_ore = (s.selected_ore - 1) % len(OreType)
             if s.selected_ore < 0 do s.selected_ore = len(OreType) - 1
         }
-        if rl.IsKeyDown(.TAB) {
+        if rl.IsKeyPressed(.TAB) {
             s.selected_slot = (s.selected_slot + 1) % 2
         }  
         s.pressed_move = SELECT_COOLDOWN
     }
     
     if rl.IsKeyPressed(.MINUS) {
-        s.scale = max(MIN_SCALE, 0.9 * s.scale)
-        s.grid_rows, s.grid_cols = grid_size()
+        s.scale = max(MIN_SCALE, s.scale - math.floor(s.scale)*0.1)
+        recalculate_grid_size()
     }
     if rl.IsKeyPressed(.EQUAL) {
-        s.scale = min(1.1 * s.scale, MAX_SCALE)
-        s.grid_rows, s.grid_cols = grid_size()
+        s.scale = min(math.floor(s.scale) * 0.1 + s.scale, MAX_SCALE)
+        recalculate_grid_size()
     }
     
     drill: if rl.IsKeyDown(.D) {
@@ -546,29 +557,45 @@ input :: proc(dt: f32) {
             }
             s.panels[s.current_panel].priority = 0
         }
-        nucoib_logln(current_panel_index) 
     }
     if rl.IsMouseButtonUp(.LEFT) {
         s.current_panel = PanelType(-1)
     }
 }
 
-rect_clamp :: proc(inner: ^Rect, outer: Rect) -> bit_set[Direction] {
+rect_clamp :: proc(inner: ^Rect, outer: Rect) {
     sides: bit_set[Direction]
     
-    if inner.pos.x < outer.pos.x {
+    if inner.pos.x <= outer.pos.x {
+        inner.pos.x = outer.pos.x
+    }
+    if inner.pos.y <= outer.pos.y {
+        inner.pos.y = outer.pos.y 
+    }
+    if inner.pos.x + inner.size.x >= outer.pos.x + outer.size.x {
+        inner.pos.x = outer.pos.x + outer.size.x - inner.size.x   
+    }
+    if inner.pos.y + inner.size.y >= outer.pos.y + outer.size.y {
+        inner.pos.y = outer.pos.y + outer.size.y - inner.size.y 
+    }
+}
+
+rect_clamp_sides :: proc(inner: ^Rect, outer: Rect) -> bit_set[Direction] {
+    sides: bit_set[Direction]
+    
+    if inner.pos.x <= outer.pos.x {
         inner.pos.x = outer.pos.x
         sides += {.Left}
     }
-    if inner.pos.y < outer.pos.y {
+    if inner.pos.y <= outer.pos.y {
         inner.pos.y = outer.pos.y 
         sides += {.Up}
     }
-    if inner.pos.x + inner.size.x > outer.pos.x + outer.size.x {
+    if inner.pos.x + inner.size.x >= outer.pos.x + outer.size.x {
         inner.pos.x = outer.pos.x + outer.size.x - inner.size.x   
         sides += {.Right}
     }
-    if inner.pos.y + inner.size.y > outer.pos.y + outer.size.y {
+    if inner.pos.y + inner.size.y >= outer.pos.y + outer.size.y {
         inner.pos.y = outer.pos.y + outer.size.y - inner.size.y 
         sides += {.Down}
     }
@@ -577,10 +604,12 @@ rect_clamp :: proc(inner: ^Rect, outer: Rect) -> bit_set[Direction] {
 
 update :: proc(dt: f32) {
     if s.current_panel != PanelType(-1) {
-        s.panels[s.current_panel].rect.pos = screen_to_grid(rl.GetMousePosition()) + s.panel_offset
-        s.panels[s.current_panel].anchor = rect_clamp(&s.panels[s.current_panel].rect, {{0, 0}, {s.grid_cols, s.grid_rows}})
+        panel := &s.panels[s.current_panel]
+        panel.rect.pos = screen_to_grid(rl.GetMousePosition()) + s.panel_offset
+        panel.pos_percentege = {f32(panel.rect.pos.x) / f32(s.grid_cols), f32(panel.rect.pos.y) / f32(s.grid_rows)}
+        panel.anchor = rect_clamp_sides(&panel.rect, {{0, 0}, {s.grid_cols, s.grid_rows}})
     }
-
+        
     for &panel in s.panels {
         switch panel.anchor {
             case {.Left}:
@@ -612,7 +641,8 @@ update :: proc(dt: f32) {
                 panel.rect.pos.y = s.grid_rows/2 - panel.rect.size.y/2
             case {}:
             case:
-                nucoib_panic("Strange direction combination: %v", panel.anchor)
+                nucoib_warningfln("Strange direction combination: %v", panel.anchor)
+                panel.anchor = {}
         }
     }
     
@@ -1172,47 +1202,67 @@ tbprintf_callback :: proc(stream_data: rawptr, mode: io.Stream_Mode, p: []u8, of
 }
 
 nucoib_log :: proc(args: ..any) {
-    fmt.print("[LOG]: ")
+    fmt.print("\x1B[38;2;170;240;208m[LOG]:\x1B[38;5;39;39;39m ")
     fmt.print(..args)
 }
 
 nucoib_logln :: proc(args: ..any) {
-    fmt.print("[LOG]: ")
+    fmt.print("\x1B[38;2;170;240;208m[LOG]:\x1B[38;5;39;39;39m ")
     fmt.println(..args)
 }
 
 nucoib_logf :: proc(str: string, args: ..any) {
-    fmt.print("[LOG]: ")
+    fmt.print("\x1B[38;2;170;240;208m[LOG]:\x1B[38;5;39;39;39m ")
     fmt.printf(str, ..args)
 }
 
 nucoib_logfln :: proc(str: string, args: ..any) {
-    fmt.print("[LOG]: ")
+    fmt.print("\x1B[38;2;170;240;208m[LOG]:\x1B[38;5;39;39;39m ")
     fmt.printfln(str, ..args)
 }
 
 nucoib_error :: proc(args: ..any) {
-    fmt.eprint("[ERROR]: ")
+    fmt.eprint("\x1B[38;2;240;90;90m[ERROR]:\x1B[38;5;39;39;39m ")
     fmt.eprint(..args)
 }
 
 nucoib_errorln :: proc(args: ..any) {
-    fmt.eprint("[ERROR]: ")
+    fmt.eprint("\x1B[38;2;240;90;90m[ERROR]:\x1B[38;5;39;39;39m ")
     fmt.eprintln(..args)
 }
 
 nucoib_errorf :: proc(str: string, args: ..any) {
-    fmt.eprint("[ERROR]: ")
+    fmt.eprint("\x1B[38;2;240;90;90m[ERROR]:\x1B[38;5;39;39;39m ")
     fmt.eprintf(str, ..args)
 }
 
 nucoib_errorfln :: proc(str: string, args: ..any) {
-    fmt.eprint("[ERROR]: ")
+    fmt.eprint("\x1B[38;2;240;90;90m[ERROR]:\x1B[38;5;39;39;39m ")
+    fmt.eprintfln(str, ..args)
+}
+
+nucoib_warning :: proc(args: ..any) {
+    fmt.eprint("\x1B[38;2;250;218;94m[WARNING]:\x1B[38;5;39;39;39m ")
+    fmt.eprint(..args)
+}
+
+nucoib_warningln :: proc(args: ..any) {
+    fmt.eprint("\x1B[38;2;250;218;94m[WARNING]:\x1B[38;5;39;39;39m ")
+    fmt.eprintln(..args)
+}
+
+nucoib_warningf :: proc(str: string, args: ..any) {
+    fmt.eprint("\x1B[38;2;250;218;94m[WARNING]:\x1B[38;5;39;39;39m ")
+    fmt.eprintf(str, ..args)
+}
+
+nucoib_warningfln :: proc(str: string, args: ..any) {
+    fmt.eprint("\x1B[38;2;250;218;94m[WARNING]:\x1B[38;5;39;39;39m ")
     fmt.eprintfln(str, ..args)
 }
 
 nucoib_panic :: proc(str: string, args: ..any, loc := #caller_location) -> ! {
-    fmt.eprintf("[PANIC]: %v: ", loc)
+    fmt.eprintf("\x1B[38;2;255;182;30m[PANIC]:\x1B[38;5;39;39;39m %v: ", loc)
     fmt.eprintfln(str, ..args)
     intrinsics.trap()
 }
@@ -1253,7 +1303,7 @@ main :: proc() {
         height = s.char_height,
     }
     
-    s.grid_rows, s.grid_cols = grid_size()
+    recalculate_grid_size()
     
     s.panels = {
         .Fps = {priority = 3, anchor = {.Left, .Down}},
