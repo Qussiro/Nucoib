@@ -78,7 +78,7 @@ Drill :: struct {
 Conveyor :: struct {
     direction:               Direction,
     ore_type:                OreType,
-    transportation_progress: f32,
+    transportation_progress: rl.Vector2,
 }
 
 Base :: struct {
@@ -709,8 +709,7 @@ update :: proc(dt: f32) {
                             if check_boundaries(pos, WORLD_RECT) {
                                 conveyor, is_conveyor := &building_ptr_at(pos).(Conveyor)
                                 if is_conveyor && conveyor.ore_type == .None && drill_ore_count(building) > 0 {
-                                    if conveyor.direction in perpendiculars[building.direction] do conveyor.transportation_progress = 0.7
-
+                                    conveyor.transportation_progress = 0.5
                                     conveyor.ore_type = building.ores[0].type
                                     building.ores[0].count -= 1
                                     if building.ores[0].count <= 0 do ordered_remove(&building.ores, 0)
@@ -720,9 +719,39 @@ update :: proc(dt: f32) {
                     }
                 case Conveyor:
                     if building.ore_type == .None do continue
-                    building.transportation_progress += dt * TRANSPORTATION_SPEED
+                    switch building.direction {
+                        case .Right:
+                            building.transportation_progress.x += dt * TRANSPORTATION_SPEED
+                            if abs(0.5 - building.transportation_progress.y) < 0.01 {
+                                building.transportation_progress.y = 0.5
+                            } else {
+                                building.transportation_progress.y += dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
+                            }
+                        case .Down:
+                            building.transportation_progress.y += dt * TRANSPORTATION_SPEED
+                            if abs(0.5 - building.transportation_progress.x) < 0.01 {
+                                building.transportation_progress.x = 0.5
+                            } else {
+                                building.transportation_progress.x += dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.x)
+                            }
+                        case .Left:
+                            building.transportation_progress.x -= dt * TRANSPORTATION_SPEED
+                            if abs(0.5 - building.transportation_progress.y) < 0.01 {
+                                building.transportation_progress.y = 0.5
+                            } else {
+                                building.transportation_progress.y += dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
+                            }
+                        case .Up:
+                            building.transportation_progress.y -= dt * TRANSPORTATION_SPEED
+                            if abs(0.5 - building.transportation_progress.x) < 0.01 {
+                                building.transportation_progress.x = 0.5
+                            } else {
+                                building.transportation_progress.x += dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.x)
+                            }
+                    }
                     next_pos := offsets[building.direction] + {i, j}
-                    transport_ore(next_pos, &building) 
+                    transport_ore(next_pos, &building)
+                    building.transportation_progress = rl.Vector2Clamp(building.transportation_progress, 0, 1)
                 case Base:
                 case Part:
             }
@@ -730,12 +759,25 @@ update :: proc(dt: f32) {
     }
 }
 
+check_conveyor_progress :: proc(conveyor: Conveyor) -> bool {
+    switch conveyor.direction {
+        case .Right:
+            return conveyor.transportation_progress.x >= 1
+        case .Left:
+            return conveyor.transportation_progress.x <= 0
+        case .Down:
+            return conveyor.transportation_progress.y >= 1
+        case .Up:
+            return conveyor.transportation_progress.y <= 0
+    }
+    nucoib_panic("Strange conveyor direction: %v", conveyor.direction)
+}
+
 transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
-    max_progress: f32 = 1
     if check_boundaries(next_pos, WORLD_RECT) {
         switch &nb in building_ptr_at(next_pos) {
             case Drill:
-                if conveyor.transportation_progress >= max_progress && conveyor.ore_type == .Coal && nb.fuel_slot.count < MAX_FUEL {
+                if check_conveyor_progress(conveyor^) && conveyor.ore_type == .Coal && nb.fuel_slot.count < MAX_FUEL {
                     if nb.fuel_slot == {} {
                         nb.fuel_slot = {.Coal, 1}
                     } else {
@@ -746,20 +788,24 @@ transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
                 }
             case Conveyor:
                 if nb.ore_type == .None && nb.direction != opposite[conveyor.direction] {
-                    match_perpendicular := nb.direction in perpendiculars[conveyor.direction]
-
-                    if match_perpendicular do max_progress = 1.7
-
-                    if conveyor.transportation_progress >= max_progress {
+                    if check_conveyor_progress(conveyor^) {
+                        switch conveyor.direction {
+                            case .Right:
+                                nb.transportation_progress = {0, conveyor.transportation_progress.y}
+                            case .Down:
+                                nb.transportation_progress = {conveyor.transportation_progress.x, 0}
+                            case .Left:
+                                nb.transportation_progress = {1, conveyor.transportation_progress.y}
+                            case .Up:
+                                nb.transportation_progress = {conveyor.transportation_progress.x, 1}
+                        }
                         nb.ore_type = conveyor.ore_type
                         conveyor.ore_type = .None
                         conveyor.transportation_progress = 0
-
-                        if match_perpendicular do nb.transportation_progress = 0.7
                     }
                 }
             case Base:
-                if conveyor.transportation_progress >= max_progress {
+                if check_conveyor_progress(conveyor^) {
                     nb.ores[conveyor.ore_type] += 1
                     conveyor.ore_type = .None
                     conveyor.transportation_progress = 0
@@ -768,7 +814,6 @@ transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
                 transport_ore(nb.main_pos, conveyor)
         }
     }
-    conveyor.transportation_progress = min(conveyor.transportation_progress, max_progress)
 }
 
 building_at :: proc(pos: Vec2i) -> Building {
@@ -912,31 +957,9 @@ draw :: proc() {
             if is_conveyor && conveyor.ore_type != .None {
                 pos := world_to_screen({i, j})
 
-                // MAGIC STUFF, DON`T TOUCH
-                ore_offset: rl.Vector2
-                switch conveyor.direction {
-                    case .Right:
-                        ore_offset = {
-                            s.char_width * s.scale * (conveyor.transportation_progress - ORE_SCALE),
-                            s.char_height * s.scale * (0.5 - 0.5*ORE_SCALE),
-                        }
-                    case .Down:
-                        ore_offset = {
-                            s.char_width * s.scale * (0.5 - 0.5*ORE_SCALE),
-                            s.char_height * s.scale * (conveyor.transportation_progress - ORE_SCALE),
-                        }
-                    case .Left:
-                        ore_offset = {
-                            s.char_width * s.scale * (1 - conveyor.transportation_progress),
-                            s.char_height * s.scale * (0.5 - 0.5*ORE_SCALE),
-                        }
-                    case .Up:
-                        ore_offset = {
-                            s.char_width * s.scale * (0.5 - 0.5*ORE_SCALE),
-                            s.char_height * s.scale * (1 - conveyor.transportation_progress),
-                        } 
-                }
-
+                // No more magic stuff, wide peepo sadge
+                ore_offset := (conveyor.transportation_progress - 0.5 * ORE_SCALE) * s.scale * {s.char_width, s.char_height}
+                
                 ore_offset += pos
                 c := get_char(conveyor.ore_type)
                 draw_char(c, ore_offset, s.scale * ORE_SCALE, {}, rl.GOLD)
