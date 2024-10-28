@@ -30,7 +30,7 @@ MAX_SCALE              :: f32(20)
 ORE_SCALE              :: f32(0.5)
 MOVE_COOLDOWN          :: f32(0.05)
 DIGGING_COOLDOWN       :: f32(0.5)
-DRILLING_TIME          :: f32(0.5) 
+DRILLING_TIME          :: f32(0.5)
 TRANSPORTATION_SPEED   :: f32(1)
 BG_COLOR               :: rl.Color {0x20, 0x20, 0x20, 0xFF}
 MAX_ORE_COUNT          :: 1000
@@ -40,12 +40,16 @@ MAX_FUEL               :: 100
 SELECT_COOLDOWN        :: f32(0.15)
 FUEL_TIME              :: f32(4)
 WORLD_RECT             :: Rect{{0, 0}, {WORLD_WIDTH, WORLD_HEIGHT}}
+LOG_COLOR              :: rl.Color{170, 240, 208, 255}
+WARNING_COLOR          :: rl.Color{250, 218, 94, 255}
+ERROR_COLOR            :: rl.Color{240, 90, 90, 255}
+PANIC_COLOR            :: rl.Color{255, 182, 30, 255}
 
 Ores      :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
 Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]Building
 Vec2i     :: [2]int
 
-Player :: struct { 
+Player :: struct {
     pos: Vec2i,
 }
 
@@ -59,7 +63,7 @@ Building :: union {
 Rect :: struct {
     pos:  Vec2i,
     size: Vec2i,
-} 
+}
 
 Drill :: struct {
     ores:           [dynamic]Ore,
@@ -94,14 +98,15 @@ OreType :: enum u8 {
 }
 
 Panel :: struct {
-    priority: int,
-    rect:     Rect,
+    priority:       int,
+    rect:           Rect,
     pos_percentege: rl.Vector2,
-    anchor:   bit_set[Direction],
-    active:   bool,
+    anchor:         bit_set[Direction],
+    active:         bool,
 }
 
 PanelType :: enum {
+    None,
     Stood,
     Fps,
     Base,
@@ -121,10 +126,10 @@ Fill :: enum {
 }
 
 Direction :: enum u8 {
-   Right,
-   Down,
-   Left,
-   Up, 
+    Right,
+    Down,
+    Left,
+    Up,
 }
 
 ListConf :: struct {
@@ -144,7 +149,7 @@ ListElement :: struct {
 State :: struct {
     ores:                 ^Ores,
     buildings:            ^Buildings,
-    base:                 ^Base, 
+    base:                 ^Base,
     player:               Player,
     font_texture:         rl.Texture2D,
     char_width:           f32,
@@ -153,7 +158,7 @@ State :: struct {
     grid_cols:            int,
     pressed_move:         f32,
     pressed_dig:          f32,
-    selected_ore:         int,
+    selected_ore:         OreType,
     selected_slot:        int,
     selected_drill:       ^Drill,
     count_clusters_sizes: [CLUSTER_SIZE + 1]int,
@@ -166,7 +171,7 @@ State :: struct {
     blank_texture_rec:    rl.Rectangle,
     panels:               [PanelType]Panel,
     panel_offset:         Vec2i,
-    current_panel:        PanelType,
+    current_panel_idx:    PanelType,
 }
 
 
@@ -174,9 +179,7 @@ s := State {
     window_width  = 1280,
     window_height = 720,
     scale         = 2,
-    direction     = Direction.Right,
-    current_panel = PanelType(-1),
-} 
+}
 
 offsets := [Direction]Vec2i {
     .Right = {1, 0},
@@ -199,16 +202,15 @@ opposite := [Direction]Direction {
     .Up    = .Down,
 }
 
-@(require_results)
 write_save :: proc() -> os.Error {
     _ = os.remove(SAVE_FILE_NAME)
     file := os.open(SAVE_FILE_NAME, os.O_CREATE | os.O_WRONLY, 0o666) or_return
-    defer os.close(file) 
-    
+    defer os.close(file)
+
     os.write(file, mem.ptr_to_bytes(&s.player)) or_return
     os.write(file, mem.ptr_to_bytes(&s.ores[0][0], WORLD_WIDTH * WORLD_HEIGHT)) or_return
     os.write(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT)) or_return
-    
+
     for i := 0; i < WORLD_WIDTH; i += 1 {
         for j := 0; j < WORLD_HEIGHT; j += 1 {
             if drill, ok := s.buildings[i][j].(Drill); ok {
@@ -226,15 +228,14 @@ write_save :: proc() -> os.Error {
     return nil
 }
 
-@(require_results)
 read_save :: proc() -> os.Error {
     file := os.open(SAVE_FILE_NAME, os.O_RDONLY) or_return
-    defer os.close(file) 
-    
+    defer os.close(file)
+
     os.read(file, mem.ptr_to_bytes(&s.player)) or_return
     os.read(file, mem.ptr_to_bytes(&s.ores[0][0], WORLD_WIDTH * WORLD_HEIGHT)) or_return
     os.read(file, mem.ptr_to_bytes(&s.buildings[0][0], WORLD_WIDTH * WORLD_HEIGHT)) or_return
-    
+
     for {
         drill_pos: Vec2i
         n, err := os.read(file, mem.ptr_to_bytes(&drill_pos))
@@ -265,7 +266,7 @@ cluster_generation :: proc(tile: OreType) {
     tovisit: queue.Queue(Vec2i)
     visited: [dynamic]Vec2i
     queue.push_back(&tovisit, Vec2i{cx, cy})
-    
+
     for queue.len(tovisit) > 0 {
         ci := queue.pop_front(&tovisit)
          
@@ -278,16 +279,16 @@ cluster_generation :: proc(tile: OreType) {
         if r >= y do continue
 
         if ci.x - 1 != -1 {
-            queue.push_back(&tovisit, Vec2i{ci.x-1, ci.y})
+            queue.push_back(&tovisit, Vec2i{ci.x - 1, ci.y})
         }
         if ci.x + 1 != WORLD_WIDTH {
-            queue.push_back(&tovisit, Vec2i{ci.x+1, ci.y})
+            queue.push_back(&tovisit, Vec2i{ci.x + 1, ci.y})
         }
         if ci.y - 1 != -1 {
-            queue.push_back(&tovisit, Vec2i{ci.x, ci.y-1})
+            queue.push_back(&tovisit, Vec2i{ci.x, ci.y - 1})
         }
         if ci.y + 1 != WORLD_HEIGHT {
-            queue.push_back(&tovisit, Vec2i{ci.x, ci.y+1})
+            queue.push_back(&tovisit, Vec2i{ci.x, ci.y + 1})
         }
 
         count := 0
@@ -300,7 +301,7 @@ cluster_generation :: proc(tile: OreType) {
         s.ores[ci.x][ci.y] = {tile, count}
         generated_count += 1
     }
-    
+
     s.count_clusters_sizes[generated_count] += 1
     delete(visited)
     queue.destroy(&tovisit)
@@ -308,17 +309,14 @@ cluster_generation :: proc(tile: OreType) {
 
 
 recalculate_grid_size :: proc() {
-    grid_rows := int(f32(s.window_height) / (s.char_height * s.scale))
-    grid_cols := int(f32(s.window_width) / (s.char_width * s.scale))
-    
+    s.grid_rows = int(f32(s.window_height) / (s.char_height * s.scale))
+    s.grid_cols = int(f32(s.window_width) / (s.char_width * s.scale))
+
     for &panel in s.panels {
-        panel.rect.pos.x = int(panel.pos_percentege.x * f32(grid_cols))
-        panel.rect.pos.y = int(panel.pos_percentege.y * f32(grid_rows))
-        rect_clamp(&panel.rect, {{0, 0}, {grid_cols, grid_rows}}) 
+        panel.rect.pos.x = int(panel.pos_percentege.x * f32(s.grid_cols))
+        panel.rect.pos.y = int(panel.pos_percentege.y * f32(s.grid_rows))
+        rect_clamp(&panel.rect, grid_rect())
     }
-    
-    s.grid_rows = grid_rows
-    s.grid_cols = grid_cols
 }
 
 try_build :: proc(B: typeid) -> bool {
@@ -327,7 +325,7 @@ try_build :: proc(B: typeid) -> bool {
         if s.base.ores[ore.type] >= ore.count {
             s.base.ores[ore.type] -= ore.count
             continue
-        }      
+        }
         return false
     }
     return true
@@ -352,7 +350,7 @@ input :: proc(dt: f32) {
         s.window_height = rl.GetScreenHeight()
         recalculate_grid_size()
     }
-    
+
     if s.pressed_move > 0 {
         s.pressed_move -= dt
     } else if s.panels[.Use].active == false {
@@ -368,19 +366,20 @@ input :: proc(dt: f32) {
         if rl.IsKeyDown(.UP) && s.player.pos.y > 0 {
             s.player.pos.y -= 1
         }
-        s.pressed_move = MOVE_COOLDOWN      
-    } 
+        s.pressed_move = MOVE_COOLDOWN
+    }
+
     select: if s.panels[.Use].active {
         if rl.IsKeyPressed(.RIGHT) && s.selected_slot == 0 {
-            ore := Ore{OreType(s.selected_ore), 0}
+            ore := Ore{s.selected_ore, 0}
             if ore.type != .Coal do break select
-            if s.selected_drill.fuel_slot == {} do s.selected_drill.fuel_slot = ore 
+            if s.selected_drill.fuel_slot == {} do s.selected_drill.fuel_slot = ore
             if s.selected_drill.fuel_slot.type == ore.type {
                 if s.base.ores[ore.type] > 0 && s.selected_drill.fuel_slot.count < MAX_FUEL {
                     if rl.IsKeyDown(.LEFT_SHIFT) {
-                        max := MAX_FUEL - s.selected_drill.fuel_slot.count
-                        s.selected_drill.fuel_slot.count += min(s.base.ores[ore.type], 5, max)
-                        s.base.ores[ore.type] -= min(s.base.ores[ore.type], 5, max)
+                        free_space := MAX_FUEL - s.selected_drill.fuel_slot.count
+                        s.selected_drill.fuel_slot.count += min(s.base.ores[ore.type], 5, free_space)
+                        s.base.ores[ore.type] -= min(s.base.ores[ore.type], 5, free_space)
                     } else {
                         s.selected_drill.fuel_slot.count += 1
                         s.base.ores[ore.type] -= 1
@@ -388,16 +387,13 @@ input :: proc(dt: f32) {
                 }
             } else {
                 if s.base.ores[ore.type] > 0 {
-                    s.base.ores[s.selected_drill.fuel_slot.type] += s.selected_drill.fuel_slot.count 
+                    s.base.ores[s.selected_drill.fuel_slot.type] += s.selected_drill.fuel_slot.count
                     s.selected_drill.fuel_slot = ore
                     s.selected_drill.fuel_slot.count += 1
                     s.base.ores[ore.type] -= 1
                 }
             }
         }
-        if rl.IsKeyPressed(.DOWN) {
-            s.selected_ore = (s.selected_ore + 1) % len(OreType)
-        }  
         if rl.IsKeyPressed(.LEFT) {
             if s.selected_slot == 0 {
                 ore_type := s.selected_drill.fuel_slot.type
@@ -424,25 +420,28 @@ input :: proc(dt: f32) {
                 }
             }
         }
+        if rl.IsKeyPressed(.DOWN) {
+            s.selected_ore = OreType((int(s.selected_ore) + 1) % len(OreType))
+        }  
         if rl.IsKeyPressed(.UP) {
-            s.selected_ore = (s.selected_ore - 1) % len(OreType)
-            if s.selected_ore < 0 do s.selected_ore = len(OreType) - 1
+            s.selected_ore = OreType(int(s.selected_ore) - 1)
+            if s.selected_ore < min(OreType) do s.selected_ore = max(OreType)
         }
         if rl.IsKeyPressed(.TAB) {
             s.selected_slot = (s.selected_slot + 1) % 2
         }  
         s.pressed_move = SELECT_COOLDOWN
     }
-    
+
     if rl.IsKeyPressed(.MINUS) {
-        s.scale = max(MIN_SCALE, s.scale - math.floor(s.scale)*0.1)
+        s.scale = max(MIN_SCALE, s.scale - math.floor(s.scale) * 0.1)
         recalculate_grid_size()
     }
     if rl.IsKeyPressed(.EQUAL) {
         s.scale = min(math.floor(s.scale) * 0.1 + s.scale, MAX_SCALE)
         recalculate_grid_size()
     }
-    
+
     drill: if rl.IsKeyDown(.D) {
         if check_boundaries(s.player.pos + 1, WORLD_RECT) {
             x := s.player.pos.x
@@ -460,9 +459,9 @@ input :: proc(dt: f32) {
             }
         }
     }
-    
+
     if rl.IsKeyPressed(.R) {
-        s.direction = Direction((i32(s.direction) + 1) % (i32(max(Direction)) + 1))
+        s.direction = Direction((int(s.direction) + 1) % len(Direction))
     }
     if rl.IsKeyPressed(.GRAVE) {
         s.panels[.Stood].active = !s.panels[.Stood].active
@@ -473,17 +472,18 @@ input :: proc(dt: f32) {
     if rl.IsKeyPressed(.F1) {
         s.panels[.Fps].active = !s.panels[.Fps].active
     }
-    if rl.IsKeyPressed(.E)  {
+
+    if rl.IsKeyPressed(.E) {
         if s.panels[.Use].active {
             s.panels[.Use].active = false
         } else {
-            #partial switch &building in building_ptr_at(s.player.pos) 
+            #partial switch &building in building_ptr_at(s.player.pos)
             {
                 case Drill:
                     s.selected_drill = &building
                     s.panels[.Use].active = !s.panels[.Use].active
                 case Part:
-                    drill, ok := &building_ptr_at(building.main_pos).(Drill) 
+                    drill, ok := &building_ptr_at(building.main_pos).(Drill)
                     if ok {
                         s.selected_drill = drill
                         s.panels[.Use].active = !s.panels[.Use].active
@@ -492,20 +492,23 @@ input :: proc(dt: f32) {
             }
         }
     }
+
     if rl.IsKeyDown(.C) {
         building := building_ptr_at(s.player.pos)
         conveyor, ok := &building.(Conveyor)
-        
-        if (ok && conveyor.direction != s.direction) { 
+
+        if (ok && conveyor.direction != s.direction) {
             conveyor.direction = s.direction
         }
         if building^ == nil && try_build(Conveyor) {
             building^ = Conveyor{direction = s.direction}
         }
     }
+
     if rl.IsKeyDown(.X) {
         delete_building(s.player.pos)
     }
+
     if s.pressed_dig > 0 {
         s.pressed_dig -= dt
     } else {
@@ -519,6 +522,7 @@ input :: proc(dt: f32) {
             }
         }
     }
+
     if rl.IsKeyPressed(.F5) {
         time := rl.GetTime()
         err := write_save()
@@ -537,52 +541,51 @@ input :: proc(dt: f32) {
             nucoib_logfln("Loaded in %.6vs", rl.GetTime() - time)
         }
     }
-    if rl.IsMouseButtonDown(.LEFT) && s.current_panel == PanelType(-1) {
+
+    if rl.IsMouseButtonDown(.LEFT) && s.current_panel_idx == .None {
         mouse_pos := screen_to_grid(rl.GetMousePosition())
-        
-        current_panel_index := PanelType(-1)
+
+        current_panel_index := PanelType.None
         for panel, i in s.panels {
             if check_boundaries(mouse_pos, panel.rect) {
-                if (current_panel_index == PanelType(-1) || panel.priority < s.panels[current_panel_index].priority) && panel.active {
+                if (current_panel_index == .None || panel.priority < s.panels[current_panel_index].priority) && panel.active {
                     current_panel_index = i
                 }
             }
         }
-        s.current_panel = current_panel_index
-        if s.current_panel != PanelType(-1) {
-            s.panel_offset = s.panels[s.current_panel].rect.pos - mouse_pos
-            // Maybe fix this shit later 
+        s.current_panel_idx = current_panel_index
+        if s.current_panel_idx != .None {
+            s.panel_offset = s.panels[s.current_panel_idx].rect.pos - mouse_pos
+            prev_priority := s.panels[s.current_panel_idx].priority
             for &panel in s.panels {
-                panel.priority += 1
+                if panel.priority < prev_priority do panel.priority += 1
             }
-            s.panels[s.current_panel].priority = 0
+            s.panels[s.current_panel_idx].priority = 0
         }
     }
+
     if rl.IsMouseButtonUp(.LEFT) {
-        s.current_panel = PanelType(-1)
+        s.current_panel_idx = .None
     }
 }
 
 rect_clamp :: proc(inner: ^Rect, outer: Rect) {
-    sides: bit_set[Direction]
-    
     if inner.pos.x <= outer.pos.x {
         inner.pos.x = outer.pos.x
     }
     if inner.pos.y <= outer.pos.y {
-        inner.pos.y = outer.pos.y 
+        inner.pos.y = outer.pos.y
     }
     if inner.pos.x + inner.size.x >= outer.pos.x + outer.size.x {
-        inner.pos.x = outer.pos.x + outer.size.x - inner.size.x   
+        inner.pos.x = outer.pos.x + outer.size.x - inner.size.x
     }
     if inner.pos.y + inner.size.y >= outer.pos.y + outer.size.y {
-        inner.pos.y = outer.pos.y + outer.size.y - inner.size.y 
+        inner.pos.y = outer.pos.y + outer.size.y - inner.size.y
     }
 }
 
 rect_clamp_sides :: proc(inner: ^Rect, outer: Rect) -> bit_set[Direction] {
     sides: bit_set[Direction]
-    
     if inner.pos.x <= outer.pos.x {
         inner.pos.x = outer.pos.x
         sides += {.Left}
@@ -602,42 +605,49 @@ rect_clamp_sides :: proc(inner: ^Rect, outer: Rect) -> bit_set[Direction] {
     return sides
 }
 
+grid_rect :: proc() -> Rect {
+    return {{0, 0}, {s.grid_cols, s.grid_rows}}
+}
+
 update :: proc(dt: f32) {
-    if s.current_panel != PanelType(-1) {
-        panel := &s.panels[s.current_panel]
+    if s.current_panel_idx != .None {
+        panel := &s.panels[s.current_panel_idx]
         panel.rect.pos = screen_to_grid(rl.GetMousePosition()) + s.panel_offset
-        panel.pos_percentege = {f32(panel.rect.pos.x) / f32(s.grid_cols), f32(panel.rect.pos.y) / f32(s.grid_rows)}
-        panel.anchor = rect_clamp_sides(&panel.rect, {{0, 0}, {s.grid_cols, s.grid_rows}})
+        panel.pos_percentege = {
+            f32(panel.rect.pos.x) / f32(s.grid_cols),
+            f32(panel.rect.pos.y) / f32(s.grid_rows),
+        }
+        panel.anchor = rect_clamp_sides(&panel.rect, grid_rect())
     }
-        
+
     for &panel in s.panels {
         switch panel.anchor {
             case {.Left}:
-                panel.rect.pos.x = 0 
+                panel.rect.pos.x = 0
             case {.Up}:
-                panel.rect.pos.y = 0 
+                panel.rect.pos.y = 0
             case {.Right}:
-                panel.rect.pos.x = s.grid_cols - panel.rect.size.x 
+                panel.rect.pos.x = s.grid_cols - panel.rect.size.x
             case {.Down}:
-                panel.rect.pos.y = s.grid_rows - panel.rect.size.y 
+                panel.rect.pos.y = s.grid_rows - panel.rect.size.y
             case {.Left, .Up}:
-                panel.rect.pos.x = 0 
-                panel.rect.pos.y = 0 
+                panel.rect.pos.x = 0
+                panel.rect.pos.y = 0
             case {.Left, .Down}:
-                panel.rect.pos.x = 0 
-                panel.rect.pos.y = s.grid_rows - panel.rect.size.y 
+                panel.rect.pos.x = 0
+                panel.rect.pos.y = s.grid_rows - panel.rect.size.y
             case {.Right, .Up}:
-                panel.rect.pos.x = s.grid_cols - panel.rect.size.x 
-                panel.rect.pos.y = 0 
+                panel.rect.pos.x = s.grid_cols - panel.rect.size.x
+                panel.rect.pos.y = 0
             case {.Right, .Down}:
-                panel.rect.pos.x = s.grid_cols - panel.rect.size.x 
-                panel.rect.pos.y = s.grid_rows - panel.rect.size.y 
+                panel.rect.pos.x = s.grid_cols - panel.rect.size.x
+                panel.rect.pos.y = s.grid_rows - panel.rect.size.y
             case {.Left, .Right}:
-                panel.rect.pos.x = s.grid_cols/2 - panel.rect.size.x/2 
+                panel.rect.pos.x = s.grid_cols/2 - panel.rect.size.x/2
             case {.Up, .Down}:
-                panel.rect.pos.y = s.grid_rows/2 - panel.rect.size.y/2 
+                panel.rect.pos.y = s.grid_rows/2 - panel.rect.size.y/2
             case {.Left, .Up, .Right, .Down}:
-                panel.rect.pos.x = s.grid_cols/2 - panel.rect.size.x/2 
+                panel.rect.pos.x = s.grid_cols/2 - panel.rect.size.x/2
                 panel.rect.pos.y = s.grid_rows/2 - panel.rect.size.y/2
             case {}:
             case:
@@ -645,13 +655,13 @@ update :: proc(dt: f32) {
                 panel.anchor = {}
         }
     }
-    
+
     for i := 0; i < WORLD_WIDTH; i += 1 {
         for j := 0; j < WORLD_HEIGHT; j += 1 {
             switch &building in s.buildings[i][j] {
                 case nil:
-                case Drill: 
-                    if building.fuel_time < 0 && building.fuel_slot.count > 0{
+                case Drill:
+                    if building.fuel_time < 0 && building.fuel_slot.count > 0 {
                         building.fuel_time = FUEL_TIME
                         building.fuel_slot.count -= 1
                         if building.fuel_slot.count == 0 do building.fuel_slot = {}
@@ -667,7 +677,7 @@ update :: proc(dt: f32) {
                                     } else {
                                         append(&building.ores, Ore{next_ore.type, 1})
                                     }
-                                
+
                                     next_ore.count -= 1
                                     if next_ore.count <= 0 do next_ore^ = {}
                                 }
@@ -679,21 +689,21 @@ update :: proc(dt: f32) {
                             building.fuel_time -= dt
                         }
                         building.drilling_timer += dt
-                    
+
                         dump_area := [2]Vec2i{{i, j}, {i, j}}
                         switch building.direction {
-                            case .Right: 
-                                dump_area[0] += 2 * offsets[building.direction] 
-                                dump_area[1] += 2 * offsets[building.direction] + {0, 1} 
-                            case .Down: 
-                                dump_area[0] += 2 * offsets[building.direction] 
-                                dump_area[1] += 2 * offsets[building.direction] + {1, 0} 
-                            case .Left: 
-                                dump_area[0] += offsets[building.direction] 
-                                dump_area[1] += offsets[building.direction] + {0, 1} 
-                            case .Up: 
-                                dump_area[0] += offsets[building.direction] 
-                                dump_area[1] += offsets[building.direction] + {1, 0} 
+                            case .Right:
+                                dump_area[0] += 2 * offsets[building.direction]
+                                dump_area[1] += 2 * offsets[building.direction] + {0, 1}
+                            case .Down:
+                                dump_area[0] += 2 * offsets[building.direction]
+                                dump_area[1] += 2 * offsets[building.direction] + {1, 0}
+                            case .Left:
+                                dump_area[0] += offsets[building.direction]
+                                dump_area[1] += offsets[building.direction] + {0, 1}
+                            case .Up:
+                                dump_area[0] += offsets[building.direction]
+                                dump_area[1] += offsets[building.direction] + {1, 0}
                         }
                         for pos in dump_area {
                             if check_boundaries(pos, WORLD_RECT) {
@@ -703,17 +713,15 @@ update :: proc(dt: f32) {
 
                                     conveyor.ore_type = building.ores[0].type
                                     building.ores[0].count -= 1
-                                    if building.ores[0].count <= 0 do ordered_remove(&building.ores, 0) 
+                                    if building.ores[0].count <= 0 do ordered_remove(&building.ores, 0)
                                 }
                             }
                         }
                     }
                 case Conveyor:
                     if building.ore_type == .None do continue
-                    
                     building.transportation_progress += dt * TRANSPORTATION_SPEED
                     next_pos := offsets[building.direction] + {i, j}
-                    
                     transport_ore(next_pos, &building) 
                 case Base:
                 case Part:
@@ -724,7 +732,7 @@ update :: proc(dt: f32) {
 
 transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
     max_progress: f32 = 1
-    if check_boundaries(next_pos, WORLD_RECT) { 
+    if check_boundaries(next_pos, WORLD_RECT) {
         switch &nb in building_ptr_at(next_pos) {
             case Drill:
                 if conveyor.transportation_progress >= max_progress && conveyor.ore_type == .Coal && nb.fuel_slot.count < MAX_FUEL {
@@ -738,7 +746,7 @@ transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
                 }
             case Conveyor:
                 if nb.ore_type == .None && nb.direction != opposite[conveyor.direction] {
-                    match_perpendicular := nb.direction in perpendiculars[conveyor.direction] 
+                    match_perpendicular := nb.direction in perpendiculars[conveyor.direction]
 
                     if match_perpendicular do max_progress = 1.7
 
@@ -752,7 +760,7 @@ transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
                 }
             case Base:
                 if conveyor.transportation_progress >= max_progress {
-                    nb.ores[conveyor.ore_type] += 1  
+                    nb.ores[conveyor.ore_type] += 1
                     conveyor.ore_type = .None
                     conveyor.transportation_progress = 0
                 }
@@ -772,7 +780,7 @@ building_ptr_at :: proc(pos: Vec2i) -> ^Building {
 }
 
 check_boundaries :: proc(pos: Vec2i, rect: Rect) -> bool {
-    return pos.x >= rect.pos.x && pos.x < rect.pos.x + rect.size.x && pos.y >= rect.pos.y && pos.y < rect.pos.y + rect.size.y  
+    return pos.x >= rect.pos.x && pos.x < rect.pos.x + rect.size.x && pos.y >= rect.pos.y && pos.y < rect.pos.y + rect.size.y
 }
 
 drill_ore_count :: proc(drill: Drill) -> int {
@@ -845,7 +853,6 @@ delete_building :: proc(pos: Vec2i) {
 
 draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
     pos := world_to_screen(world_pos)
-    
     switch building in building_ptr_at(world_pos) {
         case nil: 
         case Drill:
@@ -872,9 +879,9 @@ draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
 
 draw :: proc() {
     rl.ClearBackground(BG_COLOR)
-    
+
     first_col := max(0, s.player.pos.x - s.grid_cols/2) + 1
-    last_col  := min(s.player.pos.x + (s.grid_cols + 1)/2 - 1, WORLD_WIDTH) 
+    last_col  := min(s.player.pos.x + (s.grid_cols + 1)/2 - 1, WORLD_WIDTH)
     first_row := max(0, s.player.pos.y - s.grid_rows/2) + 1
     last_row  := min(s.player.pos.y + (s.grid_rows + 1)/2 - 1, WORLD_HEIGHT)
 
@@ -882,14 +889,14 @@ draw :: proc() {
     for i := first_col; i < last_col; i += 1 {
         for j := first_row; j < last_row; j += 1 {
             if s.buildings[i][j] != nil do continue
-            
+
             ch_ore := get_char(s.ores[i][j].type)
             pos := world_to_screen({i, j})
             under_player := s.player.pos == {i, j}
             draw_char(ch_ore, pos, reverse = under_player)
         }
     }
-    
+
     // Draw buildings
     for i := first_col; i < last_col; i += 1 {
         for j := first_row; j < last_row; j += 1 {
@@ -904,27 +911,27 @@ draw :: proc() {
             conveyor, is_conveyor := &s.buildings[i][j].(Conveyor)
             if is_conveyor && conveyor.ore_type != .None {
                 pos := world_to_screen({i, j})
-                
+
                 // MAGIC STUFF, DON`T TOUCH
                 ore_offset: rl.Vector2
                 switch conveyor.direction {
                     case .Right:
-                        ore_offset =  {
-                            s.char_width * s.scale * (conveyor.transportation_progress - ORE_SCALE), 
+                        ore_offset = {
+                            s.char_width * s.scale * (conveyor.transportation_progress - ORE_SCALE),
                             s.char_height * s.scale * (0.5 - 0.5*ORE_SCALE),
                         }
                     case .Down:
-                        ore_offset =  {
+                        ore_offset = {
                             s.char_width * s.scale * (0.5 - 0.5*ORE_SCALE),
                             s.char_height * s.scale * (conveyor.transportation_progress - ORE_SCALE),
-                        } 
-                    case .Left: 
-                        ore_offset = rl.Vector2 {
-                            s.char_width * s.scale * (1 - conveyor.transportation_progress), 
+                        }
+                    case .Left:
+                        ore_offset = {
+                            s.char_width * s.scale * (1 - conveyor.transportation_progress),
                             s.char_height * s.scale * (0.5 - 0.5*ORE_SCALE),
                         }
                     case .Up:
-                        ore_offset =  {
+                        ore_offset = {
                             s.char_width * s.scale * (0.5 - 0.5*ORE_SCALE),
                             s.char_height * s.scale * (1 - conveyor.transportation_progress),
                         } 
@@ -936,34 +943,35 @@ draw :: proc() {
             }
         }
     }
-    
+
     // RAMKA he is right
     draw_border({0, 0}, {s.grid_cols, s.grid_rows}, BG_COLOR)
-    
+
     clear_temp_buffer()
 
-    panels_indexes: [len(PanelType)]int
-    for panel, i in s.panels {
-        panels_indexes[i] = int(i)
+    panels_indexes: [len(PanelType)]PanelType
+    for _, i in s.panels {
+        panels_indexes[i] = i
     }
-    
+
     for i := 0; i < len(panels_indexes); i += 1 {
         for j := 0; j < len(panels_indexes) - i - 1; j += 1 {
-            if s.panels[PanelType(panels_indexes[j])].priority < s.panels[PanelType(panels_indexes[j + 1])].priority {
+            if s.panels[panels_indexes[j]].priority < s.panels[panels_indexes[j + 1]].priority {
                 panels_indexes[j], panels_indexes[j + 1] = panels_indexes[j + 1], panels_indexes[j]
             }
         }
     }
-    
-    for i in panels_indexes {
-        panel := &s.panels[PanelType(i)]
-        switch PanelType(i) {
+
+    for panel_idx in panels_indexes {
+        panel := &s.panels[panel_idx]
+        switch panel_idx {
+            case .None:
             case .Base:
                 elements: [len(OreType)]ListElement 
                 for ore_tile in OreType {
                     elements[ore_tile] = {tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile]), false}
                 }
-    
+
                 str_length: int
                 for element in elements {
                     if len(element.text) > str_length do str_length = len(element.text)
@@ -971,13 +979,13 @@ draw :: proc() {
 
                 panel.rect.size.x = str_length + 2
                 panel.rect.size.y = len(OreType) + 2
-    
+
                 if panel.active {
                     conf := ListConf{
                         panel.rect.pos,
                         panel.rect.size,
-                        BG_COLOR, 
-                        rl.WHITE, 
+                        BG_COLOR,
+                        rl.WHITE,
                         "MAIN",
                         elements[:],
                     }
@@ -986,7 +994,7 @@ draw :: proc() {
             case .Direction:
                 panel.rect.size = {DIRECTION_MENU_WIDTH, DIRECTION_MENU_HEIGHT}
                 draw_border(panel.rect.pos, panel.rect.size, BG_COLOR, fill = true)
-    
+
                 pos := grid_to_screen(panel.rect.pos+1)
                 switch s.direction {
                     case .Right: draw_char('>' + 0, pos, fg_color = rl.SKYBLUE)
@@ -998,7 +1006,7 @@ draw :: proc() {
                 elements: [2]ListElement
                 elements[0] = {building_to_string(building_at(s.player.pos)), false}
                 title := "STOOD-ON"
-                
+
                 ore := &s.ores[s.player.pos.x][s.player.pos.y]
                 #partial switch ore.type {
                     case .None:
@@ -1006,13 +1014,13 @@ draw :: proc() {
                     case: 
                         elements[1] = {tbprintf("%v: %v", ore.type, ore.count), false}
                 }
-                panel.rect.size = {max(len(elements[0].text), len(elements[1].text), len(title)+2) + 2, STOOD_MENU_HEIGHT}
-                
+                panel.rect.size = {max(len(elements[0].text), len(elements[1].text), len(title) + 2) + 2, STOOD_MENU_HEIGHT}
+
                 if panel.active {
                     // Ore text
                     conf := ListConf {
                         panel.rect.pos,
-                        panel.rect.size, 
+                        panel.rect.size,
                         BG_COLOR,
                         rl.WHITE,
                         title,
@@ -1023,7 +1031,7 @@ draw :: proc() {
             case .Use:
                 elements: [len(OreType)]ListElement 
                 panel.rect.size = {s.panels[.Base].rect.size.x + SLOT_MENU_WIDTH - 1, s.panels[.Base].rect.size.y}
-    
+
                 // Use menu
                 for ore_tile in OreType {
                     if OreType(s.selected_ore) == ore_tile {
@@ -1032,11 +1040,11 @@ draw :: proc() {
                         elements[ore_tile] = {tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile]), false}
                     }
                 }
-    
+
                 if panel.active {
                     right_menu_pos := panel.rect.pos + {s.panels[.Base].rect.size.x-1, 0}
                     draw_border(right_menu_pos, {SLOT_MENU_WIDTH, SLOT_MENU_HEIGHT}, BG_COLOR, fill = true, title = "USE")
-        
+
                     slot_pos := right_menu_pos + {SLOT_MENU_WIDTH/4, SLOT_MENU_HEIGHT/2} - 1
                     draw_border(slot_pos, {3, 3}, BG_COLOR, fill = true)
                     c := get_char(s.selected_drill.fuel_slot.type)
@@ -1049,17 +1057,17 @@ draw :: proc() {
                         width = s.char_width,
                         height = s.char_height,
                     }
-        
+
                     dest := rl.Rectangle {
                         x = bar_pos.x,
                         y = bar_pos.y,
                         width = s.char_width * s.scale,
                         height = s.char_height * s.scale * s.selected_drill.fuel_time / FUEL_TIME * 3,
-                    } 
-        
+                    }
+
                     rl.DrawTexturePro(s.font_texture, source, dest, {}, 0, rl.WHITE)
                     draw_text(tbprintf("%3.v", s.selected_drill.fuel_slot.count), grid_to_screen(slot_pos + {0,3}))
-        
+
                     slot_pos = right_menu_pos + {SLOT_MENU_WIDTH/2 + SLOT_MENU_WIDTH/4, SLOT_MENU_HEIGHT/2} - 1
                     draw_border(slot_pos, {3, 3}, BG_COLOR, fill = true)
                     if len(s.selected_drill.ores) == 0 {
@@ -1074,9 +1082,9 @@ draw :: proc() {
                     // Left part
                     conf := ListConf{
                         panel.rect.pos,
-                        s.panels[.Base].rect.size, 
-                        BG_COLOR, 
-                        rl.WHITE, 
+                        s.panels[.Base].rect.size,
+                        BG_COLOR,
+                        rl.WHITE,
                         "STORAGE",
                         elements[:],
                     }
@@ -1090,7 +1098,7 @@ draw :: proc() {
                     draw_border(panel.rect.pos, panel.rect.size, BG_COLOR, fill = true)
                     pos := grid_to_screen(panel.rect.pos+1)
                     draw_text(fps_text, pos)
-                }    
+                }
         }
     }
 }
@@ -1119,7 +1127,7 @@ draw_list :: proc(conf: ListConf) {
 draw_border :: proc(pos: Vec2i, size: Vec2i, bg_color: rl.Color = {}, fg_color: rl.Color = rl.WHITE, fill: bool = false, title: string = "") {
     w := size.x
     h := size.y
-    
+
     if fill == true {
         dest := rl.Rectangle {
             x = f32(pos.x) * s.char_width * s.scale,
@@ -1201,68 +1209,72 @@ tbprintf_callback :: proc(stream_data: rawptr, mode: io.Stream_Mode, p: []u8, of
     return
 }
 
+print_with_color :: proc(str: string, color: rl.Color) {
+    fmt.printf("\x1B[38;2;%v;%v;%vm%v\x1B[38;5;5;39;39;39m", color.r, color.g, color.b, str)
+}
+
 nucoib_log :: proc(args: ..any) {
-    fmt.print("\x1B[38;2;170;240;208m[LOG]:\x1B[38;5;39;39;39m ")
+    print_with_color("[LOG]: ", LOG_COLOR)
     fmt.print(..args)
 }
 
 nucoib_logln :: proc(args: ..any) {
-    fmt.print("\x1B[38;2;170;240;208m[LOG]:\x1B[38;5;39;39;39m ")
+    print_with_color("[LOG]: ", LOG_COLOR)
     fmt.println(..args)
 }
 
 nucoib_logf :: proc(str: string, args: ..any) {
-    fmt.print("\x1B[38;2;170;240;208m[LOG]:\x1B[38;5;39;39;39m ")
+    print_with_color("[LOG]: ", LOG_COLOR)
     fmt.printf(str, ..args)
 }
 
 nucoib_logfln :: proc(str: string, args: ..any) {
-    fmt.print("\x1B[38;2;170;240;208m[LOG]:\x1B[38;5;39;39;39m ")
+    print_with_color("[LOG]: ", LOG_COLOR)
     fmt.printfln(str, ..args)
 }
 
 nucoib_error :: proc(args: ..any) {
-    fmt.eprint("\x1B[38;2;240;90;90m[ERROR]:\x1B[38;5;39;39;39m ")
+    print_with_color("[ERROR]: ", ERROR_COLOR)
     fmt.eprint(..args)
 }
 
 nucoib_errorln :: proc(args: ..any) {
-    fmt.eprint("\x1B[38;2;240;90;90m[ERROR]:\x1B[38;5;39;39;39m ")
+    print_with_color("[ERROR]: ", ERROR_COLOR)
     fmt.eprintln(..args)
 }
 
 nucoib_errorf :: proc(str: string, args: ..any) {
-    fmt.eprint("\x1B[38;2;240;90;90m[ERROR]:\x1B[38;5;39;39;39m ")
+    print_with_color("[ERROR]: ", ERROR_COLOR)
     fmt.eprintf(str, ..args)
 }
 
 nucoib_errorfln :: proc(str: string, args: ..any) {
-    fmt.eprint("\x1B[38;2;240;90;90m[ERROR]:\x1B[38;5;39;39;39m ")
+    print_with_color("[ERROR]: ", ERROR_COLOR)
     fmt.eprintfln(str, ..args)
 }
 
 nucoib_warning :: proc(args: ..any) {
-    fmt.eprint("\x1B[38;2;250;218;94m[WARNING]:\x1B[38;5;39;39;39m ")
+    print_with_color("[WARNING]: ", WARNING_COLOR)
     fmt.eprint(..args)
 }
 
 nucoib_warningln :: proc(args: ..any) {
-    fmt.eprint("\x1B[38;2;250;218;94m[WARNING]:\x1B[38;5;39;39;39m ")
+    print_with_color("[WARNING]: ", WARNING_COLOR)
     fmt.eprintln(..args)
 }
 
 nucoib_warningf :: proc(str: string, args: ..any) {
-    fmt.eprint("\x1B[38;2;250;218;94m[WARNING]:\x1B[38;5;39;39;39m ")
+    print_with_color("[WARNING]: ", WARNING_COLOR)
     fmt.eprintf(str, ..args)
 }
 
 nucoib_warningfln :: proc(str: string, args: ..any) {
-    fmt.eprint("\x1B[38;2;250;218;94m[WARNING]:\x1B[38;5;39;39;39m ")
+    print_with_color("[WARNING]: ", WARNING_COLOR)
     fmt.eprintfln(str, ..args)
 }
 
 nucoib_panic :: proc(str: string, args: ..any, loc := #caller_location) -> ! {
-    fmt.eprintf("\x1B[38;2;255;182;30m[PANIC]:\x1B[38;5;39;39;39m %v: ", loc)
+    print_with_color("[PANIC]: ", PANIC_COLOR)
     fmt.eprintfln(str, ..args)
     intrinsics.trap()
 }
@@ -1272,7 +1284,7 @@ main :: proc() {
     rl.SetWindowState({.WINDOW_RESIZABLE})
     rl.SetTargetFPS(60)
     rl.SetExitKey(.KEY_NULL)
-    
+
     err: runtime.Allocator_Error
     s.ores, err = new(Ores)
     if err != nil {
@@ -1284,14 +1296,14 @@ main :: proc() {
         nucoib_errorfln("Buy MORE RAM! --> %v", err)
         nucoib_errorfln("Need memory: %v bytes", size_of(Buildings))
     }
-    
+
     total_size := f64(size_of(Ores) + size_of(Buildings)) / 1e6
     ores_size := f64(size_of(Ores)) / 1e6
     buildings_size := f64(size_of(Buildings)) / 1e6
     nucoib_logfln("Map size: %v Mb", total_size)
     nucoib_logfln("  - Ores: %v Mb (%.2v%%)", ores_size, ores_size / total_size * 100)
     nucoib_logfln("  - Buildings: %v Mb (%.2v%%)", buildings_size, buildings_size / total_size * 100)
-    
+
     s.font_texture = rl.LoadTexture("./atlas.png")
     s.char_width = f32(int(s.font_texture.width) / ATLAS_COLS)
     s.char_height = f32(int(s.font_texture.height) / ATLAS_ROWS)
@@ -1302,10 +1314,11 @@ main :: proc() {
         width = s.char_width,
         height = s.char_height,
     }
-    
+
     recalculate_grid_size()
-    
+
     s.panels = {
+        .None = {},
         .Fps = {priority = 3, anchor = {.Left, .Down}},
         .Base = {priority = 2, anchor = {.Right, .Up}},
         .Direction = {priority = 1, anchor = {.Right, .Down}, active = true},
@@ -1315,10 +1328,9 @@ main :: proc() {
 
     s.player.pos.x = WORLD_WIDTH / 2
     s.player.pos.y = WORLD_HEIGHT / 2
-    
+
     for _ in 0..<CLUSTER_COUNT {
-        max_tile := i32(max(OreType)) + 1
-        tile := OreType(rand.int31_max(max_tile))
+        tile := OreType(rand.int31_max(len(OreType)))
         cluster_generation(tile)
     }
 
@@ -1330,17 +1342,14 @@ main :: proc() {
             if i == base_pos.x && j == base_pos.y do continue
             s.buildings[i][j] = Part{base_pos}
         }
-    } 
-    
+    }
+
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
-        
         dt := rl.GetFrameTime()
-
         input(dt)
         update(dt)
         draw()
-              
         rl.EndDrawing()
-    }    
+    }
 }
