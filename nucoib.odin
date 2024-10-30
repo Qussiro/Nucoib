@@ -37,6 +37,8 @@ MAX_ORE_COUNT          :: 1000
 MIN_ORE_COUNT          :: 100
 SAVE_FILE_NAME         :: "save.bin"
 MAX_FUEL               :: 100
+DRILL_CAPACITY         :: 100
+ENERGY_CAPACITY        :: 100
 SELECT_COOLDOWN        :: f32(0.15)
 FUEL_TIME              :: f32(4)
 WORLD_RECT             :: Rect{{0, 0}, {WORLD_WIDTH, WORLD_HEIGHT}}
@@ -58,6 +60,7 @@ Building :: union {
     Conveyor,
     Base,
     Part,
+    CoalStation,
 }
 
 Rect :: struct {
@@ -67,7 +70,6 @@ Rect :: struct {
 
 Drill :: struct {
     ores:           [dynamic]Ore,
-    capacity:       u8,
     next_tile:      u8,
     drilling_timer: f32,
     fuel_time:      f32,
@@ -79,6 +81,12 @@ Conveyor :: struct {
     direction:               Direction,
     ore_type:                OreType,
     transportation_progress: rl.Vector2,
+}
+
+CoalStation :: struct {
+    energy:         u8,
+    fuel_slot:      Ore,
+    fuel_time:      f32,
 }
 
 Base :: struct {
@@ -339,6 +347,9 @@ get_resources :: proc(B: typeid) -> []Ore {
         case Conveyor:
             @(static) ores := []Ore{{.Copper, 1}}
             return ores
+        case CoalStation:
+            @(static) ores := []Ore{{.Iron, 5}, {.Copper, 5}}
+            return ores
         case:
             nucoib_panic("Couldn't get resources from building: %v", B)
     }
@@ -455,7 +466,7 @@ input :: proc(dt: f32) {
                 s.buildings[x + 1][y + 0] = Part{s.player.pos}
                 s.buildings[x + 1][y + 1] = Part{s.player.pos}
                 s.buildings[x + 0][y + 1] = Part{s.player.pos}
-                s.buildings[x + 0][y + 0] = Drill{capacity = 20, direction = s.direction}
+                s.buildings[x + 0][y + 0] = Drill{direction = s.direction}
             }
         }
     }
@@ -567,6 +578,24 @@ input :: proc(dt: f32) {
     if rl.IsMouseButtonUp(.LEFT) {
         s.current_panel_idx = .None
     }
+    
+    coal_station: if rl.IsKeyPressed(.K) {
+        if check_boundaries(s.player.pos + 1, WORLD_RECT) {
+            x := s.player.pos.x
+            y := s.player.pos.y
+            for i := x; i < x + 2; i += 1 {
+                for j := y; j < y + 2; j += 1 {
+                     if s.buildings[i][j] != nil do break coal_station
+                }
+            }
+            if try_build(CoalStation) {
+                s.buildings[x + 1][y + 0] = Part{s.player.pos}
+                s.buildings[x + 1][y + 1] = Part{s.player.pos}
+                s.buildings[x + 0][y + 1] = Part{s.player.pos}
+                s.buildings[x + 0][y + 0] = CoalStation{}
+            }
+        }
+    }
 }
 
 rect_clamp :: proc(inner: ^Rect, outer: Rect) {
@@ -669,7 +698,7 @@ update :: proc(dt: f32) {
                     if building.fuel_time >= 0 {
                         next_ore := &s.ores[i + int(building.next_tile) % 2][j + int(building.next_tile) / 2]
                         if building.drilling_timer >= DRILLING_TIME {
-                            if drill_ore_count(building) < int(building.capacity) {
+                            if drill_ore_count(building) < DRILL_CAPACITY {
                                 if next_ore.type != .None {
                                     ores := building.ores[:]
                                     if !slice.is_empty(ores) && slice.last(ores).type == next_ore.type {
@@ -685,7 +714,7 @@ update :: proc(dt: f32) {
                             }
                             building.drilling_timer = 0
                         }
-                        if drill_ore_count(building) < int(building.capacity) {
+                        if drill_ore_count(building) < DRILL_CAPACITY {
                             building.fuel_time -= dt
                         }
                         building.drilling_timer += dt
@@ -752,6 +781,17 @@ update :: proc(dt: f32) {
                     next_pos := offsets[building.direction] + {i, j}
                     transport_ore(next_pos, &building)
                     building.transportation_progress = rl.Vector2Clamp(building.transportation_progress, 0, 1)
+                case CoalStation:
+                    building.energy = 0
+                    if building.fuel_time < 0 && building.fuel_slot.count > 0 {
+                        building.fuel_time = FUEL_TIME
+                        building.fuel_slot.count -= 1
+                        if building.fuel_slot.count == 0 do building.fuel_slot = {}
+                    }
+                    if building.fuel_time >= 0 {
+                        building.energy = 100
+                        building.fuel_time -= dt
+                    }                     
                 case Base:
                 case Part:
             }
@@ -812,6 +852,16 @@ transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
                 }
             case Part:
                 transport_ore(nb.main_pos, conveyor)
+            case CoalStation:
+                if check_conveyor_progress(conveyor^) && conveyor.ore_type == .Coal && nb.fuel_slot.count < MAX_FUEL {
+                    if nb.fuel_slot == {} {
+                        nb.fuel_slot = {.Coal, 1}
+                    } else {
+                        nb.fuel_slot.count += 1
+                    }
+                    conveyor.ore_type = .None
+                    conveyor.transportation_progress = 0
+                }
         }
     }
 }
@@ -865,10 +915,11 @@ building_to_string :: proc(building: Building) -> string {
             } else {
                 return tbprintf("Drill[%v:%v]", b.ores[0].type, b.ores[0].count)
             }
-        case nil:      return tbprintf("None")
-        case Conveyor: return tbprintf("Conveyor_%v[%v]", b.direction, b.ore_type)
-        case Base:     return tbprintf("Base")
-        case Part:     return building_to_string(building_at(b.main_pos))  
+        case nil:         return tbprintf("None")
+        case Conveyor:    return tbprintf("Conveyor_%v[%v]", b.direction, b.ore_type)
+        case Base:        return tbprintf("Base")
+        case Part:        return building_to_string(building_at(b.main_pos))  
+        case CoalStation: return tbprintf("CoalStation[%v:%v]", b.energy, b.fuel_slot.count)
         case:          nucoib_panic("Unknown building type %v", b)
     }
 }
@@ -893,6 +944,14 @@ delete_building :: proc(pos: Vec2i) {
             // You cannot delete the Base
         case Part:
             delete_building(building.main_pos)
+        case CoalStation:
+            building_ptr_at(pos + {0, 0})^ = nil
+            building_ptr_at(pos + {1, 0})^ = nil
+            building_ptr_at(pos + {1, 1})^ = nil
+            building_ptr_at(pos + {0, 1})^ = nil
+            for ore in get_resources(CoalStation) {
+                s.base.ores[ore.type] += ore.count 
+            }
     }
 }
 
@@ -918,7 +977,14 @@ draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
         case Base:
             draw_char('M', pos, 3 * s.scale, BG_COLOR, rl.BEIGE, reverse = reverse)
         case Part:
-            if reverse do draw_building(building.main_pos, reverse)
+            if reverse {
+                draw_building(building.main_pos, reverse)
+            }    
+        case CoalStation:
+            draw_char('K', pos, 2 * s.scale, BG_COLOR, rl.GREEN, reverse)
+            // if reverse {
+            //     rl.DrawCircleLinesV(pos, 20*s.scale*s.char_width, rl.YELLOW)
+            // }
     }
 }
 
@@ -965,6 +1031,16 @@ draw :: proc() {
                 draw_char(c, ore_offset, s.scale * ORE_SCALE, {}, rl.GOLD)
             }
         }
+    }
+    
+    // TODO: nuke this shit
+    if _, station_ok := building_at(s.player.pos).(CoalStation); station_ok  {
+        rl.DrawCircleLinesV(world_to_screen(s.player.pos), 20*s.scale*s.char_width, rl.YELLOW)
+    } 
+    if part, part_ok := building_at(s.player.pos).(Part); part_ok {
+        if _, station_ok := building_at(part.main_pos).(CoalStation); station_ok {
+            rl.DrawCircleLinesV(world_to_screen(part.main_pos), 20*s.scale*s.char_width, rl.YELLOW)
+        } 
     }
 
     // RAMKA he is right
