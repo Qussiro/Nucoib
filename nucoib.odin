@@ -1050,8 +1050,7 @@ draw :: proc() {
                 pos := world_to_screen({i, j})
                 
                 // No more magic stuff, wide peepo sadge
-                ore_offset := (conveyor.transportation_progress - 0.5 * ORE_SCALE) * s.scale * TILE_SIZE
-                
+                ore_offset := conveyor.transportation_progress * s.scale * TILE_SIZE
                 ore_offset += pos
                 ore_color := get_ore_color(conveyor.ore_type)
                 draw_sprite(TILE_ORE, ore_offset, bg_color = rl.BLANK, fg_color = ore_color, scale = ORE_SCALE * s.scale)
