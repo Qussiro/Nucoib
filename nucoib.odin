@@ -17,11 +17,16 @@ RUNE_ROWS              :: 7
 RUNE_WIDTH             :: 7
 RUNE_HEIGHT            :: 9
 TILE_SIZE              :: 8
-TILE_ORE               :: rl.Vector2{144, 0}
-TILE_CONVEYOR          :: rl.Vector2{152, 0}
-TILE_DRILL             :: rl.Vector2{160, 0}
-TILE_MAIN              :: rl.Vector2{176, 0}
-TILE_COAL_STATION      :: rl.Vector2{200, 0}
+TILE_ORE_SIZE          :: rl.Vector2{TILE_SIZE, TILE_SIZE}
+TILE_CONVEYOR_SIZE     :: rl.Vector2{TILE_SIZE, TILE_SIZE}
+TILE_DRILL_SIZE        :: rl.Vector2{2 * TILE_SIZE, 2 * TILE_SIZE}
+TILE_MAIN_SIZE         :: rl.Vector2{3 * TILE_SIZE, 3 * TILE_SIZE}
+TILE_COAL_STATION_SIZE :: rl.Vector2{2 * TILE_SIZE, 2 * TILE_SIZE}
+TILE_ORE               :: rl.Rectangle{144, 0, TILE_ORE_SIZE.x, TILE_ORE_SIZE.y}
+TILE_CONVEYOR          :: rl.Rectangle{152, 0, TILE_CONVEYOR_SIZE.x, TILE_CONVEYOR_SIZE.y}
+TILE_DRILL             :: rl.Rectangle{160, 0, TILE_DRILL_SIZE.x, TILE_DRILL_SIZE.x}
+TILE_MAIN              :: rl.Rectangle{176, 0, TILE_MAIN_SIZE.x, TILE_MAIN_SIZE.y}
+TILE_COAL_STATION      :: rl.Rectangle{200, 0, TILE_COAL_STATION_SIZE.x, TILE_COAL_STATION_SIZE.y}
 STOOD_MENU_HEIGHT      :: 4
 DIRECTION_MENU_WIDTH   :: 3
 DIRECTION_MENU_HEIGHT  :: 3
@@ -54,6 +59,10 @@ LOG_COLOR              :: rl.Color{170, 240, 208, 255}
 WARNING_COLOR          :: rl.Color{250, 218, 94, 255}
 ERROR_COLOR            :: rl.Color{240, 90, 90, 255}
 PANIC_COLOR            :: rl.Color{255, 182, 30, 255}
+DRILL_COLOR            :: rl.Color{247, 143, 168, 255}
+COAL_STATION_COLOR     :: rl.GREEN
+CONVEYOR_COLOR         :: rl.LIGHTGRAY
+BASE_COLOR             :: rl.BEIGE
 UI_SCALE               :: 2
 
 Ores      :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
@@ -93,9 +102,10 @@ Conveyor :: struct {
 }
 
 CoalStation :: struct {
-    energy:         u8,
-    fuel_slot:      Ore,
-    fuel_time:      f32,
+    energy:    u8,
+    fuel_slot: Ore,
+    fuel_time: f32,
+    active:    bool,
 }
 
 Base :: struct {
@@ -189,7 +199,6 @@ State :: struct {
     panel_offset:         rl.Vector2,
     current_panel_idx:    PanelType,
 }
-
 
 s := State {
     window_width  = 1280,
@@ -797,15 +806,17 @@ update :: proc(dt: f32) {
                     building.transportation_progress = rl.Vector2Clamp(building.transportation_progress, 0, 1)
                 case CoalStation:
                     building.energy = 0
+                    building.active = false
                     if building.fuel_time < 0 && building.fuel_slot.count > 0 {
                         building.fuel_time = FUEL_TIME
                         building.fuel_slot.count -= 1
                         if building.fuel_slot.count == 0 do building.fuel_slot = {}
                     }
                     if building.fuel_time >= 0 {
+                        building.active = true
                         building.energy = 100
                         building.fuel_time -= dt
-                    }                     
+                    }
                 case Base:
                 case Part:
             }
@@ -973,53 +984,57 @@ delete_building :: proc(pos: Vec2i) {
     }
 }
 
+new_rect :: proc(pos: rl.Vector2, size: rl.Vector2) -> rl.Rectangle {
+    return {pos.x + 0.5 * size.x * s.scale, pos.y + 0.5 * size.y * s.scale, size.x * s.scale, size.y * s.scale}
+}
+
 draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
     pos := world_to_screen(world_pos)
     switch building in building_ptr_at(world_pos) {
         case nil: 
         case Drill:
+            dest := new_rect(pos, TILE_DRILL_SIZE)
             switch building.direction {
-                case .Right: draw_sprite(TILE_DRILL + {TILE_SIZE * 0, TILE_SIZE * 0}, pos, BG_COLOR, {247, 143, 168, 255}, reverse, 0)
-                case .Down:  draw_sprite(TILE_DRILL + {TILE_SIZE * 0, TILE_SIZE * 1}, pos, BG_COLOR, {247, 143, 168, 255}, reverse, 90)
-                case .Left:  draw_sprite(TILE_DRILL + {TILE_SIZE * 1, TILE_SIZE * 1}, pos, BG_COLOR, {247, 143, 168, 255}, reverse, 180)
-                case .Up:    draw_sprite(TILE_DRILL + {TILE_SIZE * 1, TILE_SIZE * 0}, pos, BG_COLOR, {247, 143, 168, 255}, reverse, 270)
+                case .Right: draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 0)
+                case .Down:  draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 90)
+                case .Left:  draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 180)
+                case .Up:    draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 270)
             }
         case Conveyor:
+            dest := new_rect(pos, TILE_ORE_SIZE)
             switch building.direction {
-                case .Right: draw_sprite(TILE_CONVEYOR, pos, rl.GRAY, rl.LIGHTGRAY, reverse, 0)
-                case .Down:  draw_sprite(TILE_CONVEYOR, pos, rl.GRAY, rl.LIGHTGRAY, reverse, 90)
-                case .Left:  draw_sprite(TILE_CONVEYOR, pos, rl.GRAY, rl.LIGHTGRAY, reverse, 180)
-                case .Up:    draw_sprite(TILE_CONVEYOR, pos, rl.GRAY, rl.LIGHTGRAY, reverse, 270)
+                case .Right: draw_sprite_pro(TILE_CONVEYOR, dest, rl.GRAY, CONVEYOR_COLOR, reverse, 0)
+                case .Down:  draw_sprite_pro(TILE_CONVEYOR, dest, rl.GRAY, CONVEYOR_COLOR, reverse, 90)
+                case .Left:  draw_sprite_pro(TILE_CONVEYOR, dest, rl.GRAY, CONVEYOR_COLOR, reverse, 180)
+                case .Up:    draw_sprite_pro(TILE_CONVEYOR, dest, rl.GRAY, CONVEYOR_COLOR, reverse, 270)
             }
         case Base:
-            draw_sprite(TILE_MAIN, pos, BG_COLOR, rl.BEIGE, reverse, 0)
+            dest := new_rect(pos, TILE_MAIN_SIZE)
+            draw_sprite_pro(TILE_MAIN, dest, BG_COLOR, BASE_COLOR, reverse, 0)
         case CoalStation:
-            draw_sprite(TILE_COAL_STATION, pos, BG_COLOR, rl.GREEN, reverse, 0)
+            dest: rl.Rectangle
+            if building.active {
+                squash := f32(math.sin(rl.GetTime()*3) + 1)/8 + 0.75
+            
+                dest = rl.Rectangle {
+                    x = pos.x + 0.5 * TILE_COAL_STATION_SIZE.x * s.scale,
+                    y = pos.y + (0.5 + (1 - squash)/2) * TILE_COAL_STATION_SIZE.y * s.scale,
+                    width = TILE_COAL_STATION_SIZE.x * s.scale * (1-squash + 0.75),
+                    height = TILE_COAL_STATION_SIZE.y * s.scale * squash,
+                }
+            } else {
+                dest = rl.Rectangle {
+                    x = pos.x + 0.5 * TILE_COAL_STATION_SIZE.x * s.scale,
+                    y = pos.y + 0.5 * TILE_COAL_STATION_SIZE.y * s.scale,
+                    width = TILE_COAL_STATION_SIZE.x * s.scale,
+                    height = TILE_COAL_STATION_SIZE.y * s.scale,
+                }
+            }
+            
+            draw_sprite_pro(TILE_COAL_STATION, dest, BG_COLOR, COAL_STATION_COLOR, reverse, 0)
         case Part:
-            sprite_offset := rl.Vector2{
-                f32(world_pos.x - building.main_pos.x) * TILE_SIZE, 
-                f32(world_pos.y - building.main_pos.y) * TILE_SIZE,
-            } 
-            #partial switch main_building in building_at(building.main_pos) {
-                case Drill:
-                    switch main_building.direction {
-                        case .Right:
-                            draw_sprite(TILE_DRILL + sprite_offset, pos, BG_COLOR, {247, 143, 168, 255}, reverse, 0)
-                        case .Down:
-                            sprite_offset = rl.Vector2Rotate(sprite_offset, -math.PI/2)
-                            draw_sprite(TILE_DRILL + {0, TILE_SIZE} + sprite_offset, pos, BG_COLOR, {247, 143, 168, 255}, reverse, 90)
-                        case .Left:
-                            sprite_offset = rl.Vector2Rotate(sprite_offset, -math.PI)
-                            draw_sprite(TILE_DRILL + {TILE_SIZE, TILE_SIZE} + sprite_offset, pos, BG_COLOR, {247, 143, 168, 255}, reverse, 180)
-                        case .Up:
-                            sprite_offset = rl.Vector2Rotate(sprite_offset, -3*math.PI/2)
-                            draw_sprite(TILE_DRILL + {TILE_SIZE, 0} + sprite_offset, pos, BG_COLOR, {247, 143, 168, 255}, reverse, 270)
-                    }
-                case Base:
-                    draw_sprite(TILE_MAIN + sprite_offset, pos, BG_COLOR, rl.BEIGE, reverse, 0)
-                case CoalStation:
-                    draw_sprite(TILE_COAL_STATION + sprite_offset, pos, BG_COLOR, rl.GREEN, reverse, 0)
-                case: nucoib_panic("Unsupported building part: %v", main_building)
+            if reverse {
+                draw_building(building.main_pos, reverse)
             }
     }
 }
@@ -1040,7 +1055,8 @@ draw :: proc() {
             ore_color := get_ore_color(s.ores[i][j].type)
             pos := world_to_screen({i, j})
             under_player := s.player.pos == {i, j}
-            draw_sprite(TILE_ORE, pos, reverse = under_player, fg_color = ore_color)
+            dest := new_rect(pos, TILE_ORE_SIZE)
+            draw_sprite_pro(TILE_ORE, dest, BG_COLOR, ore_color, under_player, 0)
         }
     }
 
@@ -1063,14 +1079,16 @@ draw :: proc() {
                 ore_offset := conveyor.transportation_progress * s.scale * TILE_SIZE
                 ore_offset += pos
                 ore_color := get_ore_color(conveyor.ore_type)
-                draw_sprite(TILE_ORE, ore_offset, bg_color = rl.BLANK, fg_color = ore_color, scale = ORE_SCALE * s.scale)
+                dest := new_rect(ore_offset - 0.5 * TILE_ORE_SIZE * ORE_SCALE * s.scale, TILE_ORE_SIZE * ORE_SCALE)
+                draw_sprite_pro(TILE_ORE, dest, rl.BLANK, ore_color, false, 0)
             }
         }
     }
 
     // Player
     if s.ores[s.player.pos.x][s.player.pos.y].type == .None && building_at(s.player.pos) == nil {
-        draw_sprite(TILE_ORE, world_to_screen(s.player.pos), bg_color = rl.WHITE, fg_color = rl.WHITE)
+        dest := new_rect(world_to_screen(s.player.pos), TILE_SIZE)
+        draw_sprite_pro(TILE_ORE, dest, rl.WHITE, rl.WHITE, false, 0)
     } 
     
     // TODO: nuke this shit
@@ -1165,7 +1183,7 @@ draw :: proc() {
                     draw_list(conf)
                 }
             case .Use:
-                elements: [len(OreType)]ListElement 
+                elements: [len(OreType)]ListElement
                 panel.rect.width = s.panels[.Base].rect.width + (SLOT_MENU_WIDTH - 1) * RUNE_WIDTH * UI_SCALE 
                 panel.rect.height = s.panels[.Base].rect.height
 
@@ -1330,24 +1348,12 @@ draw_text :: proc(text: string, pos: rl.Vector2, reverse: bool = false) {
     }
 }
 
-draw_sprite :: proc(sprite_pos: rl.Vector2, pos: rl.Vector2, bg_color: rl.Color = BG_COLOR, fg_color: rl.Color = rl.WHITE, reverse: bool = false, rotation: f32 = 0, scale := s.scale) {
-    source := rl.Rectangle {
-        x = sprite_pos.x,
-        y = sprite_pos.y,
-        width = TILE_SIZE,
-        height = TILE_SIZE,
-    }
-    dest := rl.Rectangle {
-        x = pos.x + 0.5 * TILE_SIZE * scale,
-        y = pos.y + 0.5 * TILE_SIZE * scale,
-        width = TILE_SIZE * scale,
-        height = TILE_SIZE * scale,
-    } 
+draw_sprite_pro :: proc(source: rl.Rectangle, dest: rl.Rectangle, bg_color: rl.Color, fg_color: rl.Color, reverse: bool, rotation: f32) {
     fg_color_temp, bg_color_temp := fg_color, bg_color
-
-    if reverse do fg_color_temp, bg_color_temp = bg_color, fg_color 
-    if bg_color_temp.a != 0 do rl.DrawTexturePro(s.font_texture, s.blank_texture_rec, dest, TILE_SIZE*s.scale/2, rotation, bg_color_temp)
-    if fg_color_temp.a != 0 do rl.DrawTexturePro(s.font_texture, source, dest, TILE_SIZE*s.scale/2, rotation, fg_color_temp) 
+    if reverse do fg_color_temp, bg_color_temp = bg_color, fg_color
+    if bg_color_temp.a != 0 do rl.DrawTexturePro(s.font_texture, s.blank_texture_rec, dest, {dest.width, dest.height}/2, rotation, bg_color_temp)
+    if fg_color_temp.a != 0 do rl.DrawTexturePro(s.font_texture, source, dest, {dest.width, dest.height}/2, rotation, fg_color_temp) 
+    rl.DrawCircleLinesV({dest.x,dest.y},5,rl.RED)
 }
 
 draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32 = UI_SCALE, bg_color: rl.Color = BG_COLOR, fg_color: rl.Color = rl.WHITE, reverse: bool = false) {
