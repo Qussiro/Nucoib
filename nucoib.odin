@@ -64,6 +64,9 @@ COAL_STATION_COLOR     :: rl.GREEN
 CONVEYOR_COLOR         :: rl.LIGHTGRAY
 BASE_COLOR             :: rl.BEIGE
 UI_SCALE               :: 2
+DRILL_SHAKING_SPEED    :: 20
+DRILL_MAX_OFFSET       :: 5
+DRILL_MAX_ROTATION     :: 5
 
 Ores      :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
 Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]Building
@@ -87,12 +90,17 @@ Rect :: struct {
 }
 
 Drill :: struct {
-    ores:           [dynamic]Ore,
-    next_tile:      u8,
-    drilling_timer: f32,
-    fuel_time:      f32,
-    direction:      Direction,
-    fuel_slot:      Ore,
+    ores:             [dynamic]Ore,
+    next_tile:        u8,
+    drilling_timer:   f32,
+    fuel_time:        f32,
+    direction:        Direction,
+    fuel_slot:        Ore,
+    target_offset:    rl.Vector2,
+    current_offset:   rl.Vector2,
+    target_rotation:  f32,
+    current_rotation: f32,
+    active:           bool,
 }
 
 Conveyor :: struct {
@@ -198,6 +206,7 @@ State :: struct {
     panels:               [PanelType]Panel,
     panel_offset:         rl.Vector2,
     current_panel_idx:    PanelType,
+    dt:                   f32,
 }
 
 s := State {
@@ -366,7 +375,7 @@ get_resources :: proc(B: typeid) -> []Ore {
     }
 }
 
-input :: proc(dt: f32) {
+input :: proc() {
     if rl.IsWindowResized() {
         s.window_width = rl.GetScreenWidth()
         s.window_height = rl.GetScreenHeight()
@@ -380,7 +389,7 @@ input :: proc(dt: f32) {
     }
 
     if s.pressed_move > 0 {
-        s.pressed_move -= dt
+        s.pressed_move -= s.dt
     } else if s.panels[.Use].active == false {
         if rl.IsKeyDown(.RIGHT) && s.player.pos.x < WORLD_WIDTH - 1 {
             s.player.pos.x += 1
@@ -538,7 +547,7 @@ input :: proc(dt: f32) {
     }
 
     if s.pressed_dig > 0 {
-        s.pressed_dig -= dt
+        s.pressed_dig -= s.dt
     } else {
         if rl.IsKeyDown(.SPACE) {
             current_tile := &s.ores[s.player.pos.x][s.player.pos.y]
@@ -660,7 +669,7 @@ screen_rect :: proc() -> rl.Rectangle {
     return {0, 0, f32(s.window_width), f32(s.window_height)}
 }
 
-update :: proc(dt: f32) {
+update :: proc() {
     if s.current_panel_idx != .None {
         panel := &s.panels[s.current_panel_idx]
         panel.rect.x = rl.GetMousePosition().x + s.panel_offset.x
@@ -713,6 +722,7 @@ update :: proc(dt: f32) {
             switch &building in s.buildings[i][j] {
                 case nil:
                 case Drill:
+                    building.active = false
                     if building.fuel_time < 0 && building.fuel_slot.count > 0 {
                         building.fuel_time = FUEL_TIME
                         building.fuel_slot.count -= 1
@@ -738,9 +748,10 @@ update :: proc(dt: f32) {
                             building.drilling_timer = 0
                         }
                         if drill_ore_count(building) < DRILL_CAPACITY {
-                            building.fuel_time -= dt
+                            building.fuel_time -= s.dt
+                            building.active = true
                         }
-                        building.drilling_timer += dt
+                        building.drilling_timer += s.dt
 
                         dump_area := [2]Vec2i{{i, j}, {i, j}}
                         switch building.direction {
@@ -773,32 +784,32 @@ update :: proc(dt: f32) {
                     if building.ore_type == .None do continue
                     switch building.direction {
                         case .Right:
-                            building.transportation_progress.x += dt * TRANSPORTATION_SPEED
+                            building.transportation_progress.x += s.dt * TRANSPORTATION_SPEED
                             if abs(0.5 - building.transportation_progress.y) < 0.01 {
                                 building.transportation_progress.y = 0.5
                             } else {
-                                building.transportation_progress.y += dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
+                                building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
                             }
                         case .Down:
-                            building.transportation_progress.y += dt * TRANSPORTATION_SPEED
+                            building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED
                             if abs(0.5 - building.transportation_progress.x) < 0.01 {
                                 building.transportation_progress.x = 0.5
                             } else {
-                                building.transportation_progress.x += dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.x)
+                                building.transportation_progress.x += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.x)
                             }
                         case .Left:
-                            building.transportation_progress.x -= dt * TRANSPORTATION_SPEED
+                            building.transportation_progress.x -= s.dt * TRANSPORTATION_SPEED
                             if abs(0.5 - building.transportation_progress.y) < 0.01 {
                                 building.transportation_progress.y = 0.5
                             } else {
-                                building.transportation_progress.y += dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
+                                building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
                             }
                         case .Up:
-                            building.transportation_progress.y -= dt * TRANSPORTATION_SPEED
+                            building.transportation_progress.y -= s.dt * TRANSPORTATION_SPEED
                             if abs(0.5 - building.transportation_progress.x) < 0.01 {
                                 building.transportation_progress.x = 0.5
                             } else {
-                                building.transportation_progress.x += dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.x)
+                                building.transportation_progress.x += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.x)
                             }
                     }
                     next_pos := offsets[building.direction] + {i, j}
@@ -815,7 +826,7 @@ update :: proc(dt: f32) {
                     if building.fuel_time >= 0 {
                         building.active = true
                         building.energy = 100
-                        building.fuel_time -= dt
+                        building.fuel_time -= s.dt
                     }
                 case Base:
                 case Part:
@@ -990,16 +1001,35 @@ new_rect :: proc(pos: rl.Vector2, size: rl.Vector2) -> rl.Rectangle {
 
 draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
     pos := world_to_screen(world_pos)
-    switch building in building_ptr_at(world_pos) {
+    switch &building in building_ptr_at(world_pos) {
         case nil: 
         case Drill:
-            dest := new_rect(pos, TILE_DRILL_SIZE)
-            switch building.direction {
-                case .Right: draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 0)
-                case .Down:  draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 90)
-                case .Left:  draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 180)
-                case .Up:    draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 270)
+            // TODO: cringe code make better MAYBE 
+            if building.active {
+                if rl.Vector2Length(building.target_offset - building.current_offset) > DRILL_SHAKING_SPEED*0.05 {
+                    building.current_offset += (building.target_offset - building.current_offset)/rl.Vector2Length(building.target_offset - building.current_offset) * DRILL_SHAKING_SPEED * s.dt
+                } else {
+                    building.target_offset = {rand.float32() * DRILL_MAX_OFFSET - DRILL_MAX_OFFSET, rand.float32() * DRILL_MAX_OFFSET - DRILL_MAX_OFFSET}
+                }
+                if abs(building.target_rotation - building.current_rotation) > DRILL_SHAKING_SPEED*0.05 {
+                    building.current_rotation += (building.target_rotation - building.current_rotation)/abs(building.target_rotation - building.current_rotation) * DRILL_SHAKING_SPEED * s.dt
+                } else {
+                    building.target_rotation = rand.float32() * DRILL_MAX_ROTATION - DRILL_MAX_ROTATION
+                }                
+            } else {
+                building.current_offset = 0
+                building.current_rotation = 0
             }
+            dest := new_rect(pos+building.current_offset, TILE_DRILL_SIZE)
+            
+            
+            switch building.direction {
+                case .Right: draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 0+building.current_rotation)
+                case .Down:  draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 90+building.current_rotation)
+                case .Left:  draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 180+building.current_rotation)
+                case .Up:    draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, 270+building.current_rotation)
+            }
+            
         case Conveyor:
             dest := new_rect(pos, TILE_ORE_SIZE)
             switch building.direction {
@@ -1353,7 +1383,6 @@ draw_sprite_pro :: proc(source: rl.Rectangle, dest: rl.Rectangle, bg_color: rl.C
     if reverse do fg_color_temp, bg_color_temp = bg_color, fg_color
     if bg_color_temp.a != 0 do rl.DrawTexturePro(s.font_texture, s.blank_texture_rec, dest, {dest.width, dest.height}/2, rotation, bg_color_temp)
     if fg_color_temp.a != 0 do rl.DrawTexturePro(s.font_texture, source, dest, {dest.width, dest.height}/2, rotation, fg_color_temp) 
-    rl.DrawCircleLinesV({dest.x,dest.y},5,rl.RED)
 }
 
 draw_char :: proc(c: u8, pos: rl.Vector2, scale: f32 = UI_SCALE, bg_color: rl.Color = BG_COLOR, fg_color: rl.Color = rl.WHITE, reverse: bool = false) {
@@ -1534,9 +1563,9 @@ main :: proc() {
 
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
-        dt := rl.GetFrameTime()
-        input(dt)
-        update(dt)
+        s.dt = rl.GetFrameTime()
+        input()
+        update()
         draw()
         rl.EndDrawing()
     }
