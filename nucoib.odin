@@ -10,6 +10,7 @@ import "core:os"
 import "core:mem"
 import "base:runtime"
 import "base:intrinsics"
+import "core:math/noise"
 import rl "vendor:raylib"
 
 RUNE_COLS              :: 18
@@ -24,6 +25,7 @@ TILE_DRILL_SIZE        :: rl.Vector2{2 * TILE_SIZE, 2 * TILE_SIZE}
 TILE_MAIN_SIZE         :: rl.Vector2{3 * TILE_SIZE, 3 * TILE_SIZE}
 TILE_COAL_STATION_SIZE :: rl.Vector2{2 * TILE_SIZE, 2 * TILE_SIZE}
 TILE_SPLITTER_SIZE     :: rl.Vector2{TILE_SIZE, TILE_SIZE}
+TILE_BOULDER_SIZE      :: rl.Vector2{TILE_SIZE, TILE_SIZE}
 
 TILE_ORE               :: rl.Rectangle{144, 0, TILE_ORE_SIZE.x, TILE_ORE_SIZE.y}
 TILE_CONVEYOR          :: rl.Rectangle{152, 0, TILE_CONVEYOR_SIZE.x, TILE_CONVEYOR_SIZE.y}
@@ -31,6 +33,7 @@ TILE_DRILL             :: rl.Rectangle{160, 0, TILE_DRILL_SIZE.x, TILE_DRILL_SIZ
 TILE_MAIN              :: rl.Rectangle{176, 0, TILE_MAIN_SIZE.x, TILE_MAIN_SIZE.y}
 TILE_COAL_STATION      :: rl.Rectangle{200, 0, TILE_COAL_STATION_SIZE.x, TILE_COAL_STATION_SIZE.y}
 TILE_SPLITTER          :: rl.Rectangle{216, 0, TILE_SPLITTER_SIZE.x, TILE_SPLITTER_SIZE.y}
+TILE_BOULDER           :: rl.Rectangle{224, 0, TILE_ORE_SIZE.x, TILE_ORE_SIZE.y}
 
 STOOD_MENU_HEIGHT      :: 4
 DIRECTION_MENU_WIDTH   :: 3
@@ -45,8 +48,8 @@ WORLD_HEIGHT           :: 1000
 WORLD_RECT             :: Rect{{0, 0}, {WORLD_WIDTH, WORLD_HEIGHT}}
 SAVE_FILE_NAME         :: "save.bin"
 
-CLUSTER_SIZE           :: 100
-CLUSTER_COUNT          :: 10000
+CLUSTER_SIZE           :: 150
+CLUSTER_COUNT          :: 1000
 MAX_ORE_COUNT          :: 1000
 MIN_ORE_COUNT          :: 100
 
@@ -61,8 +64,8 @@ DRILL_SHAKING_SPEED    :: 20
 DRILL_MAX_OFFSET       :: 5
 DRILL_MAX_ROTATION     :: 5
 TRANSPORTATION_SPEED   :: f32(1)
-MAX_FUEL               :: 100
-DRILL_CAPACITY         :: 100
+MAX_FUEL               :: 10
+DRILL_CAPACITY         :: 10
 ENERGY_CAPACITY        :: 100
 SELECT_COOLDOWN        :: f32(0.15)
 FUEL_TIME              :: f32(4)
@@ -74,6 +77,7 @@ PANIC_COLOR            :: rl.Color{255, 182, 30, 255}
 
 BG_COLOR               :: rl.Color {0x20, 0x20, 0x20, 0xFF}
 DRILL_COLOR            :: rl.Color{247, 143, 168, 255}
+BOULDER_COLOR          :: rl.Color{174, 128, 128, 255}
 SPLITTER_COLOR         :: rl.LIGHTGRAY
 COAL_STATION_COLOR     :: rl.GREEN
 CONVEYOR_COLOR         :: rl.LIGHTGRAY
@@ -81,7 +85,7 @@ BASE_COLOR             :: rl.BEIGE
 
 UI_SCALE               :: 2
 
-Ores      :: [WORLD_WIDTH][WORLD_HEIGHT]Ore
+Ores      :: [WORLD_WIDTH][WORLD_HEIGHT]Tile
 Buildings :: [WORLD_WIDTH][WORLD_HEIGHT]Building
 Vec2i     :: [2]int
 
@@ -149,6 +153,13 @@ OreType :: enum u8 {
     Tungsten,
     Coal,
     Copper,
+}
+
+Boulder :: struct {}
+
+Tile :: union {
+    Boulder,
+    Ore,
 }
 
 Panel :: struct {
@@ -310,6 +321,16 @@ read_save :: proc() -> os.Error {
     return nil
 }
 
+boulder_generation :: proc() {
+    seed := rand.int63()
+    for i := 0; i < WORLD_WIDTH; i +=1 {
+        for j := 0; j < WORLD_HEIGHT; j +=1 {
+            num := noise.noise_2d(seed, {f64(i)/50,f64(j)/50})
+            if num > 0.5 && math.pow(f32(i-(WORLD_WIDTH/2)),2) + math.pow(f32(j-(WORLD_HEIGHT/2)),2) > 25*25 do s.ores[i][j] = Boulder{}
+        } 
+    } 
+}
+
 cluster_generation :: proc(tile: OreType) {
     visited_count := 0
     generated_count := 0
@@ -351,7 +372,7 @@ cluster_generation :: proc(tile: OreType) {
             count = rand.int_max(max - min) + min
         }
 
-        s.ores[ci.x][ci.y] = {tile, count}
+        s.ores[ci.x][ci.y] = Ore{tile, count}
         generated_count += 1
     }
 
@@ -413,17 +434,21 @@ input :: proc() {
     if s.pressed_move > 0 {
         s.pressed_move -= s.dt
     } else if s.panels[.Use].active == false {
-        if rl.IsKeyDown(.RIGHT) && s.player.pos.x < WORLD_WIDTH - 1 {
-            s.player.pos.x += 1
+        if rl.IsKeyDown(.RIGHT) && s.player.pos.x < WORLD_WIDTH - 1  {
+            _, ok := s.ores[s.player.pos.x+1][s.player.pos.y].(Boulder)
+            if !ok do s.player.pos.x += 1
         }
         if rl.IsKeyDown(.DOWN) && s.player.pos.y < WORLD_HEIGHT - 1 {
-            s.player.pos.y += 1
+            _, ok := s.ores[s.player.pos.x][s.player.pos.y+1].(Boulder)
+            if !ok do s.player.pos.y += 1
         }  
         if rl.IsKeyDown(.LEFT) && s.player.pos.x > 0 {
-            s.player.pos.x -= 1 
+            _, ok := s.ores[s.player.pos.x-1][s.player.pos.y].(Boulder)
+            if !ok do s.player.pos.x -= 1
         }
         if rl.IsKeyDown(.UP) && s.player.pos.y > 0 {
-            s.player.pos.y -= 1
+            _, ok := s.ores[s.player.pos.x][s.player.pos.y-1].(Boulder)
+            if !ok do s.player.pos.y -= 1
         }
         s.pressed_move = MOVE_COOLDOWN
     }
@@ -507,7 +532,8 @@ input :: proc() {
             y := s.player.pos.y
             for i := x; i < x + 2; i += 1 {
                 for j := y; j < y + 2; j += 1 {
-                     if s.buildings[i][j] != nil do break drill
+                    _, ok := s.ores[i][j].(Boulder)
+                    if s.buildings[i][j] != nil || ok do break drill
                 }
             }
             if try_build(Drill) {
@@ -585,8 +611,8 @@ input :: proc() {
         s.pressed_dig -= s.dt
     } else {
         if rl.IsKeyDown(.SPACE) {
-            current_tile := &s.ores[s.player.pos.x][s.player.pos.y]
-            if current_tile.type != .None {
+            current_tile, ok := &s.ores[s.player.pos.x][s.player.pos.y].(Ore)
+            if ok && current_tile.type != .None {
                 s.base.ores[current_tile.type] += 1
                 current_tile.count -= 1
                 if current_tile.count <= 0 do current_tile.type = .None
@@ -647,7 +673,8 @@ input :: proc() {
             y := s.player.pos.y
             for i := x; i < x + 2; i += 1 {
                 for j := y; j < y + 2; j += 1 {
-                     if s.buildings[i][j] != nil do break coal_station
+                    _, ok := s.ores[i][j].(Boulder)
+                    if s.buildings[i][j] != nil || ok do break coal_station
                 }
             }
             if try_build(CoalStation) {
@@ -657,6 +684,9 @@ input :: proc() {
                 s.buildings[x + 0][y + 0] = CoalStation{}
             }
         }
+    }
+    if rl.IsKeyPressed(.F12) {
+        generate_world()        
     }
 }
 
@@ -764,7 +794,8 @@ update :: proc() {
                         if building.fuel_slot.count == 0 do building.fuel_slot = {}
                     }
                     if building.fuel_time >= 0 {
-                        next_ore := &s.ores[i + int(building.next_tile) % 2][j + int(building.next_tile) / 2]
+                        next_ore, ok := &s.ores[i + int(building.next_tile) % 2][j + int(building.next_tile) / 2].(Ore)
+                        if !ok do continue
                         if building.drilling_timer >= DRILLING_TIME {
                             if drill_ore_count(building) < DRILL_CAPACITY {
                                 if next_ore.type != .None {
@@ -1166,8 +1197,8 @@ delete_building :: proc(pos: Vec2i) {
     }
 }
 
-new_rect :: proc(pos: rl.Vector2, size: rl.Vector2) -> rl.Rectangle {
-    return {pos.x + 0.5 * size.x * s.scale, pos.y + 0.5 * size.y * s.scale, size.x * s.scale, size.y * s.scale}
+new_rect :: proc(pos: rl.Vector2, size: rl.Vector2, scale: f32 = s.scale) -> rl.Rectangle {
+    return {pos.x + 0.5 * size.x * scale, pos.y + 0.5 * size.y * scale, size.x * scale, size.y * scale}
 }
 
 draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
@@ -1261,11 +1292,17 @@ draw :: proc() {
         for j := first_row; j < last_row; j += 1 {
             if s.buildings[i][j] != nil do continue
 
-            ore_color := get_ore_color(s.ores[i][j].type)
             pos := world_to_screen({i, j})
             under_player := s.player.pos == {i, j}
             dest := new_rect(pos, TILE_ORE_SIZE)
-            draw_sprite_pro(TILE_ORE, dest, BG_COLOR, ore_color, under_player, 0)
+            switch tile in s.ores[i][j] {
+                case Boulder:
+                    draw_sprite_pro(TILE_BOULDER, dest, BG_COLOR, BOULDER_COLOR, under_player, 0)
+                case Ore:
+                    ore_color := get_ore_color(tile.type)
+                    draw_sprite_pro(TILE_ORE, dest, BG_COLOR, ore_color, under_player, 0)
+            }
+            
         }
     }
 
@@ -1301,7 +1338,8 @@ draw :: proc() {
     }
 
     // Player
-    if s.ores[s.player.pos.x][s.player.pos.y].type == .None && building_at(s.player.pos) == nil {
+    ore, ok := s.ores[s.player.pos.x][s.player.pos.y].(Ore)
+    if ok && ore.type == .None && building_at(s.player.pos) == nil {
         dest := new_rect(world_to_screen(s.player.pos), TILE_SIZE)
         draw_sprite_pro(TILE_ORE, dest, rl.WHITE, rl.WHITE, false, 0)
     } 
@@ -1376,7 +1414,8 @@ draw :: proc() {
                 elements[0] = {building_to_string(building_at(s.player.pos)), false}
                 title := "STOOD-ON"
 
-                ore := &s.ores[s.player.pos.x][s.player.pos.y]
+                ore, ok := &s.ores[s.player.pos.x][s.player.pos.y].(Ore)
+                if !ok do continue
                 #partial switch ore.type {
                     case .None:
                         elements[1] = {tbprintf("None"), false}
@@ -1427,8 +1466,10 @@ draw :: proc() {
                         3 * RUNE_HEIGHT * UI_SCALE,
                     }
                     draw_border(slot_rect, BG_COLOR)
-                    c := get_char(s.selected_drill.fuel_slot.type)
-                    draw_char(c, {slot_rect.x + RUNE_WIDTH * UI_SCALE, slot_rect.y + RUNE_HEIGHT * UI_SCALE}, reverse = s.selected_slot == 0)
+                    
+                    ore_color := get_ore_color(s.selected_drill.fuel_slot.type)
+                    ore_dest := new_rect({slot_rect.x + RUNE_WIDTH * UI_SCALE, slot_rect.y + RUNE_HEIGHT * UI_SCALE}, TILE_ORE_SIZE, UI_SCALE)
+                    draw_sprite_pro(TILE_ORE, ore_dest, BG_COLOR, ore_color, s.selected_slot == 0, 0)
 
                     bar_pos := rl.Vector2{slot_rect.x + 3 * RUNE_WIDTH * UI_SCALE, slot_rect.y}
                     source := rl.Rectangle {
@@ -1459,13 +1500,14 @@ draw :: proc() {
                     
                     draw_border(slot_rect, BG_COLOR)
                     if len(s.selected_drill.ores) == 0 {
-                        c = get_char(.None)
+                        ore_color = get_ore_color(.None)
                         draw_text(tbprintf("000"), slot_text_pos)
                     } else {
-                        c = get_char(s.selected_drill.ores[0].type)
+                        ore_color = get_ore_color(s.selected_drill.ores[0].type)
                         draw_text(tbprintf("%3.v", s.selected_drill.ores[0].count), slot_text_pos)
                     }
-                    draw_char(c, {slot_rect.x + RUNE_WIDTH * UI_SCALE, slot_rect.y + RUNE_HEIGHT * UI_SCALE}, reverse = s.selected_slot == 1)
+                    ore_dest = new_rect({slot_rect.x + RUNE_WIDTH * UI_SCALE, slot_rect.y + RUNE_HEIGHT * UI_SCALE}, TILE_ORE_SIZE, UI_SCALE)
+                    draw_sprite_pro(TILE_ORE, ore_dest, BG_COLOR, ore_color, s.selected_slot == 1, 0)
 
                     left_rect := rl.Rectangle {
                         panel.rect.x, 
@@ -1503,17 +1545,6 @@ get_ore_color :: proc(ore_type: OreType) -> rl.Color {
         case .Tungsten: return {235, 255, 235, 255}
         case .Coal:     return rl.DARKGRAY
         case .Copper:   return rl.ORANGE
-        case: nucoib_panic("Unknown ore type: %v", ore_type)
-    }
-}
-
-get_char :: proc(ore_type: OreType) -> u8 {
-    switch ore_type {
-        case .None:     return ' '
-        case .Iron:     return 'I'
-        case .Tungsten: return 'T'
-        case .Coal:     return 'c'
-        case .Copper:   return 'C'
         case: nucoib_panic("Unknown ore type: %v", ore_type)
     }
 }
@@ -1683,6 +1714,17 @@ nucoib_panic :: proc(str: string, args: ..any, loc := #caller_location) -> ! {
     intrinsics.trap()
 }
 
+generate_world :: proc() {
+    slice.fill(s.ores[:][:], Ore{.None, 0})
+    
+    for _ in 0..<CLUSTER_COUNT {
+        tile := OreType(rand.int31_max(len(OreType)))
+        cluster_generation(tile)
+    }
+
+    boulder_generation()
+}
+
 main :: proc() {
     rl.InitWindow(s.window_width, s.window_height, "nucoib")
     rl.SetWindowState({.WINDOW_RESIZABLE})
@@ -1691,6 +1733,7 @@ main :: proc() {
 
     err: runtime.Allocator_Error
     s.ores, err = new(Ores)
+    
     if err != nil {
         nucoib_errorfln("Buy MORE RAM! --> %v", err)
         nucoib_errorfln("Need memory: %v bytes", size_of(Ores))
@@ -1731,10 +1774,7 @@ main :: proc() {
     s.player.pos.x = WORLD_WIDTH / 2
     s.player.pos.y = WORLD_HEIGHT / 2
 
-    for _ in 0..<CLUSTER_COUNT {
-        tile := OreType(rand.int31_max(len(OreType)))
-        cluster_generation(tile)
-    }
+    generate_world()
 
     base_pos := Vec2i{WORLD_WIDTH, WORLD_HEIGHT} / 2 - 1
     building_ptr_at(base_pos)^ = Base{}
