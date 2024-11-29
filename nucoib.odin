@@ -734,6 +734,26 @@ screen_rect :: proc() -> rl.Rectangle {
     return {0, 0, f32(s.window_width), f32(s.window_height)}
 }
 
+is_building_free :: proc(pos: Vec2i, conveyor: ^Conveyor) -> bool {
+    switch b in building_at(pos) {
+        case Drill:
+            return b.fuel_slot.count < MAX_FUEL && conveyor.ore_type == .Coal
+        case Conveyor:
+            return b.ore_type == .None && opposite[conveyor.direction] != b.direction
+        case Splitter:
+            return b.ore_type == .None && opposite[conveyor.direction] != b.direction
+        case Base:
+            return true
+        case Part:
+            return is_building_free(b.main_pos, conveyor)
+        case CoalStation:
+            return b.fuel_slot.count < MAX_FUEL && conveyor.ore_type == .Coal
+        case nil:
+            return false
+    }
+    nucoib_panic("Unreachable: ", building_at(pos))
+}
+
 update :: proc() {
     if s.current_panel_idx != .None {
         panel := &s.panels[s.current_panel_idx]
@@ -859,28 +879,36 @@ update :: proc() {
                     if building.ore_type == .None do continue
                     switch building.direction {
                         case .Right:
-                            building.transportation_progress.x += s.dt * TRANSPORTATION_SPEED
+                            if !is_building_free(offsets[building.direction] + {i, j}, &building) && building.transportation_progress.x < 0.5 || is_building_free(offsets[building.direction] + {i, j}, &building) {
+                                building.transportation_progress.x += s.dt * TRANSPORTATION_SPEED
+                            }
                             if abs(0.5 - building.transportation_progress.y) < 0.01 {
                                 building.transportation_progress.y = 0.5
                             } else {
                                 building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
                             }
                         case .Down:
-                            building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED
+                            if !is_building_free(offsets[building.direction] + {i, j}, &building) && building.transportation_progress.y < 0.5 || is_building_free(offsets[building.direction] + {i, j}, &building) {
+                                building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED
+                            }
                             if abs(0.5 - building.transportation_progress.x) < 0.01 {
                                 building.transportation_progress.x = 0.5
                             } else {
                                 building.transportation_progress.x += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.x)
                             }
                         case .Left:
-                            building.transportation_progress.x -= s.dt * TRANSPORTATION_SPEED
+                            if !is_building_free(offsets[building.direction] + {i, j}, &building) && building.transportation_progress.x > 0.5 || is_building_free(offsets[building.direction] + {i, j}, &building) {
+                                building.transportation_progress.x -= s.dt * TRANSPORTATION_SPEED
+                            }
                             if abs(0.5 - building.transportation_progress.y) < 0.01 {
                                 building.transportation_progress.y = 0.5
                             } else {
                                 building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
                             }
                         case .Up:
-                            building.transportation_progress.y -= s.dt * TRANSPORTATION_SPEED
+                            if !is_building_free(offsets[building.direction] + {i, j}, &building) && building.transportation_progress.y > 0.5 || is_building_free(offsets[building.direction] + {i, j}, &building) {
+                                building.transportation_progress.y -= s.dt * TRANSPORTATION_SPEED
+                            }
                             if abs(0.5 - building.transportation_progress.x) < 0.01 {
                                 building.transportation_progress.x = 0.5
                             } else {
@@ -892,8 +920,24 @@ update :: proc() {
                     building.transportation_progress = rl.Vector2Clamp(building.transportation_progress, 0, 1)
                 case Splitter:
                     if building.ore_type == .None do continue
-
+                    
+                    good_direction: {
+                        direction := building.next
+                        
+                        for k := 0; k < len(Direction); k += 1 {
+                            if direction == opposite[building.direction] {
+                                direction = Direction((int(direction)+1)%len(Direction)) 
+                                continue
+                            }
+                            if building_at(offsets[direction] + {i, j}) != nil && is_building_free(offsets[direction] + {i, j}, &building) {
+                                building.next = direction   
+                                break good_direction
+                            }
+                            direction = Direction((int(direction)+1)%len(Direction)) 
+                        }
+                    } 
                     can_transfer := true
+                    
                     check: if building_at(offsets[building.next] + {i, j}) == nil {
                         for direction in Direction {
                             if direction == opposite[building.direction] do continue
@@ -902,35 +946,43 @@ update :: proc() {
                                 building.next = direction
                                 break check
                             }
-                        } 
+                        }
                         can_transfer = false
                     }
 
                     if can_transfer {
                         switch building.next {
                             case .Right:
-                                building.transportation_progress.x += s.dt * TRANSPORTATION_SPEED
+                                if !is_building_free(offsets[building.next] + {i, j}, &building) && building.transportation_progress.x < 0.5 || is_building_free(offsets[building.next] + {i, j}, &building) {
+                                    building.transportation_progress.x += s.dt * TRANSPORTATION_SPEED
+                                }
                                 if abs(0.5 - building.transportation_progress.y) < 0.01 {
                                     building.transportation_progress.y = 0.5
                                 } else {
                                     building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
                                 }
                             case .Down:
-                                building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED
+                                if !is_building_free(offsets[building.next] + {i, j}, &building) && building.transportation_progress.y < 0.5 || is_building_free(offsets[building.next] + {i, j}, &building) {
+                                    building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED
+                                }
                                 if abs(0.5 - building.transportation_progress.x) < 0.01 {
                                     building.transportation_progress.x = 0.5
                                 } else {
                                     building.transportation_progress.x += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.x)
                                 }
                             case .Left:
-                                building.transportation_progress.x -= s.dt * TRANSPORTATION_SPEED
+                                if !is_building_free(offsets[building.next] + {i, j}, &building) && building.transportation_progress.x > 0.5 || is_building_free(offsets[building.next] + {i, j}, &building) {
+                                    building.transportation_progress.x -= s.dt * TRANSPORTATION_SPEED
+                                }
                                 if abs(0.5 - building.transportation_progress.y) < 0.01 {
                                     building.transportation_progress.y = 0.5
                                 } else {
                                     building.transportation_progress.y += s.dt * TRANSPORTATION_SPEED * math.sign(0.5 - building.transportation_progress.y)
                                 }
                             case .Up:
-                                building.transportation_progress.y -= s.dt * TRANSPORTATION_SPEED
+                                if !is_building_free(offsets[building.next] + {i, j}, &building) && building.transportation_progress.y > 0.5 || is_building_free(offsets[building.next] + {i, j}, &building) {
+                                    building.transportation_progress.y -= s.dt * TRANSPORTATION_SPEED
+                                }
                                 if abs(0.5 - building.transportation_progress.x) < 0.01 {
                                     building.transportation_progress.x = 0.5
                                 } else {
@@ -1730,7 +1782,7 @@ main :: proc() {
     rl.SetWindowState({.WINDOW_RESIZABLE})
     rl.SetTargetFPS(60)
     rl.SetExitKey(.KEY_NULL)
-
+    
     err: runtime.Allocator_Error
     s.ores, err = new(Ores)
     
@@ -1789,6 +1841,7 @@ main :: proc() {
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
         s.dt = rl.GetFrameTime()
+        if s.dt > 1./20 do s.dt = 1./20
         input()
         update()
         draw()
