@@ -98,9 +98,9 @@ BuildingType :: enum {
     Drill,
     Conveyor,
     Splitter,
+    CoalStation,
     Base,
     Part,
-    CoalStation,
 }
 
 Building :: struct {
@@ -237,6 +237,7 @@ State :: struct {
     pressed_move:         f32,
     pressed_dig:          f32,
     selected_ore:         OreType,
+    selected_building:    BuildingType,
     selected_slot:        int,
     selected_drill:       ^Drill,
     count_clusters_sizes: [CLUSTER_SIZE + 1]int,
@@ -257,6 +258,7 @@ s := State {
     window_width  = 1280,
     window_height = 720,
     scale         = 2,
+    selected_building = BuildingType(1),
 }
 
 offsets := [Direction]Vec2i {
@@ -450,7 +452,7 @@ input :: proc() {
 
     if s.pressed_move > 0 {
         s.pressed_move -= s.dt
-    } else if s.panels[.Use].active == false {
+    } else if s.panels[.Use].active == false && s.panels[.Building].active == false {
         if rl.IsKeyDown(.RIGHT) && s.player.pos.x < WORLD_WIDTH - 1  {
             _, ok := s.ores[s.player.pos.x + 1][s.player.pos.y].(Boulder)
             if !ok do s.player.pos.x += 1
@@ -543,29 +545,7 @@ input :: proc() {
         recalculate_grid_size()
     }
 
-    drill: if rl.IsKeyDown(.D) {
-        if check_boundaries(s.player.pos + 1, WORLD_RECT) {
-            x := s.player.pos.x
-            y := s.player.pos.y
-            for i := x; i < x + 2; i += 1 {
-                for j := y; j < y + 2; j += 1 {
-                    _, ok := s.ores[i][j].(Boulder)
-                    if s.buildings[i][j].type != .None || ok do break drill
-                }
-            }
-            if try_build(Drill) {
-                s.buildings[x + 1][y + 0].type = .Part
-                s.buildings[x + 1][y + 1].type = .Part
-                s.buildings[x + 0][y + 1].type = .Part
-                s.buildings[x + 0][y + 0].type = .Drill
-                s.buildings[x + 1][y + 0].as.part = {s.player.pos}
-                s.buildings[x + 1][y + 1].as.part = {s.player.pos}
-                s.buildings[x + 0][y + 1].as.part = {s.player.pos}
-                s.buildings[x + 0][y + 0].as.drill = {direction = s.direction}
-            }
-        }
-    }
-
+    
     if rl.IsKeyPressed(.R) {
         s.direction = Direction((int(s.direction) + 1) % len(Direction))
     }
@@ -578,8 +558,95 @@ input :: proc() {
     if rl.IsKeyPressed(.F1) {
         s.panels[.Fps].active = !s.panels[.Fps].active
     }
+    if rl.IsKeyPressed(.B) && !s.panels[.Use].active {
+        s.panels[.Building].active = !s.panels[.Building].active
+    }
 
-    if rl.IsKeyPressed(.E) {
+    if s.panels[.Building].active {
+        if rl.IsKeyPressed(.DOWN) {
+            s.selected_building = BuildingType((int(s.selected_building) + 1))
+            // bullshit "-2"
+            if s.selected_building > max(BuildingType)-BuildingType(2) do s.selected_building = BuildingType(1) 
+        }
+        if rl.IsKeyPressed(.UP) {
+            s.selected_building = BuildingType(int(s.selected_building) - 1)
+            if s.selected_building < min(BuildingType) + BuildingType(1) do s.selected_building = max(BuildingType) - BuildingType(2)
+        }
+    }
+    if rl.IsKeyDown(.SPACE) {
+        build: switch s.selected_building {
+            case .Drill:
+                if check_boundaries(s.player.pos + 1, WORLD_RECT) {
+                    x := s.player.pos.x
+                    y := s.player.pos.y
+                    for i := x; i < x + 2; i += 1 {
+                        for j := y; j < y + 2; j += 1 {
+                            _, ok := s.ores[i][j].(Boulder)
+                            if s.buildings[i][j].type != .None || ok do break build
+                        }
+                    }
+                    if try_build(Drill) {
+                        s.buildings[x + 1][y + 0].type = .Part
+                        s.buildings[x + 1][y + 1].type = .Part
+                        s.buildings[x + 0][y + 1].type = .Part
+                        s.buildings[x + 0][y + 0].type = .Drill
+                        s.buildings[x + 1][y + 0].as.part = {s.player.pos}
+                        s.buildings[x + 1][y + 1].as.part = {s.player.pos}
+                        s.buildings[x + 0][y + 1].as.part = {s.player.pos}
+                        s.buildings[x + 0][y + 0].as.drill = {direction = s.direction}
+                    }
+                }
+            case .Conveyor:
+                building := building_ptr_at(s.player.pos)
+
+                if building.type == .Conveyor && building.as.conveyor.direction != s.direction {
+                    building.as.conveyor.direction = s.direction
+                }
+                if building.type == .None && try_build(Conveyor) {
+                    building.type = .Conveyor
+                    building.as.conveyor = {direction = s.direction}
+                }
+            
+            case .Splitter:
+                building := building_ptr_at(s.player.pos)
+
+                if (building.type == .Splitter && building.as.splitter.direction != s.direction) {
+                    building.as.splitter.direction = s.direction
+                    building.as.splitter.next = s.direction
+                }
+                if building.type == .None && try_build(Splitter) {
+                    building.type = .Splitter
+                    building.as.splitter = {direction = s.direction, next = s.direction}
+                }
+            
+            case .CoalStation:
+                if check_boundaries(s.player.pos + 1, WORLD_RECT) {
+                    x := s.player.pos.x
+                    y := s.player.pos.y
+                    for i := x; i < x + 2; i += 1 {
+                        for j := y; j < y + 2; j += 1 {
+                            _, ok := s.ores[i][j].(Boulder)
+                            if s.buildings[i][j].type != .None || ok do break build
+                        }
+                    }
+                    if try_build(CoalStation) {
+                        s.buildings[x + 1][y + 0].type = .Part
+                        s.buildings[x + 1][y + 1].type = .Part
+                        s.buildings[x + 0][y + 1].type = .Part
+                        s.buildings[x + 0][y + 0].type = .CoalStation
+                        s.buildings[x + 1][y + 0].as.part = {s.player.pos}
+                        s.buildings[x + 1][y + 1].as.part = {s.player.pos}
+                        s.buildings[x + 0][y + 1].as.part = {s.player.pos}
+                        s.buildings[x + 0][y + 0].as.coal_station = {}
+                    }
+                }
+            case .None:
+            case .Base:
+            case .Part:
+        }
+    }
+
+    if rl.IsKeyPressed(.E) && !s.panels[.Building].active {
         if s.panels[.Use].active {
             s.panels[.Use].active = false
         } else {
@@ -600,31 +667,6 @@ input :: proc() {
         }
     }
 
-    if rl.IsKeyDown(.C) {
-        building := building_ptr_at(s.player.pos)
-
-        if building.type == .Conveyor && building.as.conveyor.direction != s.direction {
-            building.as.conveyor.direction = s.direction
-        }
-        if building.type == .None && try_build(Conveyor) {
-            building.type = .Conveyor
-            building.as.conveyor = {direction = s.direction}
-        }
-    }
-
-    if rl.IsKeyDown(.V) {
-        building := building_ptr_at(s.player.pos)
-
-        if (building.type == .Splitter && building.as.splitter.direction != s.direction) {
-            building.as.splitter.direction = s.direction
-            building.as.splitter.next = s.direction
-        }
-        if building.type == .None && try_build(Splitter) {
-            building.type = .Splitter
-            building.as.splitter = {direction = s.direction, next = s.direction}
-        }
-    }
-
     if rl.IsKeyDown(.X) {
         delete_building(s.player.pos)
     }
@@ -632,7 +674,7 @@ input :: proc() {
     if s.pressed_dig > 0 {
         s.pressed_dig -= s.dt
     } else {
-        if rl.IsKeyDown(.SPACE) {
+        if rl.IsKeyDown(.Z) {
             current_tile, ok := &s.ores[s.player.pos.x][s.player.pos.y].(Ore)
             if ok && current_tile.type != .None {
                 s.base.ores[current_tile.type] += 1
@@ -689,28 +731,6 @@ input :: proc() {
         s.current_panel_idx = .None
     }
 
-    coal_station: if rl.IsKeyPressed(.K) {
-        if check_boundaries(s.player.pos + 1, WORLD_RECT) {
-            x := s.player.pos.x
-            y := s.player.pos.y
-            for i := x; i < x + 2; i += 1 {
-                for j := y; j < y + 2; j += 1 {
-                    _, ok := s.ores[i][j].(Boulder)
-                    if s.buildings[i][j].type != .None || ok do break coal_station
-                }
-            }
-            if try_build(CoalStation) {
-                s.buildings[x + 1][y + 0].type = .Part
-                s.buildings[x + 1][y + 1].type = .Part
-                s.buildings[x + 0][y + 1].type = .Part
-                s.buildings[x + 0][y + 0].type = .CoalStation
-                s.buildings[x + 1][y + 0].as.part = {s.player.pos}
-                s.buildings[x + 1][y + 1].as.part = {s.player.pos}
-                s.buildings[x + 0][y + 1].as.part = {s.player.pos}
-                s.buildings[x + 0][y + 0].as.coal_station = {}
-            }
-        }
-    }
     if rl.IsKeyPressed(.F12) {
         generate_world()
     }
@@ -1659,7 +1679,31 @@ draw :: proc() {
                     pos := rl.Vector2{panel.rect.x + RUNE_WIDTH * UI_SCALE, panel.rect.y + RUNE_HEIGHT * UI_SCALE}
                     draw_text(fps_text, pos)
                 }
-            case .Building: 
+            case .Building:
+                // bullshit "-3"
+                elements: [len(BuildingType)-3]ListElement
+                text_length := 0
+                for i := 0; i < len(elements); i += 1 {
+                    if s.selected_building == BuildingType(i+1) {
+                        elements[i] = {tbprintf("%v", BuildingType(i+1)), true}
+                    } else {
+                        elements[i] = {tbprintf("%v", BuildingType(i+1)), false}
+                    }
+                    text_length = max(text_length, len(elements[i].text))
+                } 
+                panel.rect.width = (f32(text_length) + 5) * RUNE_WIDTH * UI_SCALE
+                panel.rect.height = (len(elements) + 2) * RUNE_HEIGHT * UI_SCALE
+
+                if panel.active {
+                    conf := ListConf{
+                        panel.rect,
+                        BG_COLOR,
+                        rl.WHITE,
+                        "BUILDINGS",
+                        elements[:],
+                    }
+                    draw_list(conf)
+                }
         }
     }
 }
