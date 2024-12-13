@@ -93,13 +93,26 @@ Player :: struct {
     pos: Vec2i,
 }
 
-Building :: union {
+BuildingType :: enum {
+    None,
     Drill,
     Conveyor,
     Splitter,
     Base,
     Part,
     CoalStation,
+}
+
+Building :: struct {
+    type: BuildingType,
+    as: struct #raw_union {
+        drill: Drill,
+        conveyor: Conveyor,
+        splitter: Splitter,
+        base: Base,
+        part: Part,
+        coal_station: CoalStation,
+    }
 }
 
 Rect :: struct {
@@ -177,6 +190,7 @@ PanelType :: enum {
     Base,
     Direction,
     Use,
+    Building,
 }
 
 Ore :: struct {
@@ -277,9 +291,10 @@ write_save :: proc() -> os.Error {
 
     for i := 0; i < WORLD_WIDTH; i += 1 {
         for j := 0; j < WORLD_HEIGHT; j += 1 {
-            if drill, ok := s.buildings[i][j].(Drill); ok {
+            if s.buildings[i][j].type == .Drill {
                 os.write(file, mem.ptr_to_bytes(&Vec2i{i, j})) or_return
-
+                
+                drill := &s.buildings[i][j].as.drill
                 ores_length := len(drill.ores)
                 os.write(file, mem.ptr_to_bytes(&ores_length)) or_return
 
@@ -305,8 +320,10 @@ read_save :: proc() -> os.Error {
         n, err := os.read(file, mem.ptr_to_bytes(&drill_pos))
         if err == os.ERROR_EOF || n == 0 do break
         if err != nil do return err
-
-        drill := &building_ptr_at(drill_pos).(Drill)
+        
+        
+        assert(building_ptr_at(drill_pos).type == .Drill)
+        drill := &building_ptr_at(drill_pos).as.drill
         drill.ores = {}
 
         ores_length: int
@@ -533,14 +550,18 @@ input :: proc() {
             for i := x; i < x + 2; i += 1 {
                 for j := y; j < y + 2; j += 1 {
                     _, ok := s.ores[i][j].(Boulder)
-                    if s.buildings[i][j] != nil || ok do break drill
+                    if s.buildings[i][j].type != .None || ok do break drill
                 }
             }
             if try_build(Drill) {
-                s.buildings[x + 1][y + 0] = Part{s.player.pos}
-                s.buildings[x + 1][y + 1] = Part{s.player.pos}
-                s.buildings[x + 0][y + 1] = Part{s.player.pos}
-                s.buildings[x + 0][y + 0] = Drill{direction = s.direction}
+                s.buildings[x + 1][y + 0].type = .Part
+                s.buildings[x + 1][y + 1].type = .Part
+                s.buildings[x + 0][y + 1].type = .Part
+                s.buildings[x + 0][y + 0].type = .Drill
+                s.buildings[x + 1][y + 0].as.part = {s.player.pos}
+                s.buildings[x + 1][y + 1].as.part = {s.player.pos}
+                s.buildings[x + 0][y + 1].as.part = {s.player.pos}
+                s.buildings[x + 0][y + 0].as.drill = {direction = s.direction}
             }
         }
     }
@@ -562,15 +583,16 @@ input :: proc() {
         if s.panels[.Use].active {
             s.panels[.Use].active = false
         } else {
-            #partial switch &building in building_ptr_at(s.player.pos)
+            building := building_ptr_at(s.player.pos)
+            #partial switch building.type
             {
-                case Drill:
-                    s.selected_drill = &building
+                case .Drill:
+                    s.selected_drill = &building.as.drill
                     s.panels[.Use].active = !s.panels[.Use].active
-                case Part:
-                    drill, ok := &building_ptr_at(building.main_pos).(Drill)
-                    if ok {
-                        s.selected_drill = drill
+                case .Part:
+                    building_main := building_ptr_at(building.as.part.main_pos)
+                    if building_main.type == .Drill {
+                        s.selected_drill = &building_main.as.drill
                         s.panels[.Use].active = !s.panels[.Use].active
                     }
                 case:
@@ -580,26 +602,26 @@ input :: proc() {
 
     if rl.IsKeyDown(.C) {
         building := building_ptr_at(s.player.pos)
-        conveyor, ok := &building.(Conveyor)
 
-        if (ok && conveyor.direction != s.direction) {
-            conveyor.direction = s.direction
+        if building.type == .Conveyor && building.as.conveyor.direction != s.direction {
+            building.as.conveyor.direction = s.direction
         }
-        if building^ == nil && try_build(Conveyor) {
-            building^ = Conveyor{direction = s.direction}
+        if building.type == .None && try_build(Conveyor) {
+            building.type = .Conveyor
+            building.as.conveyor = {direction = s.direction}
         }
     }
 
     if rl.IsKeyDown(.V) {
         building := building_ptr_at(s.player.pos)
-        splitter, ok := &building.(Splitter)
 
-        if (ok && splitter.direction != s.direction) {
-            splitter.direction = s.direction
-            splitter.next = s.direction
+        if (building.type == .Splitter && building.as.splitter.direction != s.direction) {
+            building.as.splitter.direction = s.direction
+            building.as.splitter.next = s.direction
         }
-        if building^ == nil && try_build(Splitter) {
-            building^ = Splitter{direction = s.direction, next = s.direction}
+        if building.type == .None && try_build(Splitter) {
+            building.type = .Splitter
+            building.as.splitter = {direction = s.direction, next = s.direction}
         }
     }
 
@@ -674,14 +696,18 @@ input :: proc() {
             for i := x; i < x + 2; i += 1 {
                 for j := y; j < y + 2; j += 1 {
                     _, ok := s.ores[i][j].(Boulder)
-                    if s.buildings[i][j] != nil || ok do break coal_station
+                    if s.buildings[i][j].type != .None || ok do break coal_station
                 }
             }
             if try_build(CoalStation) {
-                s.buildings[x + 1][y + 0] = Part{s.player.pos}
-                s.buildings[x + 1][y + 1] = Part{s.player.pos}
-                s.buildings[x + 0][y + 1] = Part{s.player.pos}
-                s.buildings[x + 0][y + 0] = CoalStation{}
+                s.buildings[x + 1][y + 0].type = .Part
+                s.buildings[x + 1][y + 1].type = .Part
+                s.buildings[x + 0][y + 1].type = .Part
+                s.buildings[x + 0][y + 0].type = .CoalStation
+                s.buildings[x + 1][y + 0].as.part = {s.player.pos}
+                s.buildings[x + 1][y + 1].as.part = {s.player.pos}
+                s.buildings[x + 0][y + 1].as.part = {s.player.pos}
+                s.buildings[x + 0][y + 0].as.coal_station = {}
             }
         }
     }
@@ -735,20 +761,26 @@ screen_rect :: proc() -> rl.Rectangle {
 }
 
 is_building_free :: proc(pos: Vec2i, conveyor: ^Conveyor) -> bool {
-    switch b in building_at(pos) {
-        case Drill:
+    b := building_at(pos)
+    switch b.type {
+        case .Drill:
+            b := b.as.drill
             return b.fuel_slot.count < MAX_FUEL && conveyor.ore_type == .Coal
-        case Conveyor:
+        case .Conveyor:
+            b := b.as.conveyor
             return b.ore_type == .None && opposite[conveyor.direction] != b.direction
-        case Splitter:
+        case .Splitter:
+            b := b.as.splitter
             return b.ore_type == .None && opposite[conveyor.direction] != b.direction
-        case Base:
+        case .Base:
             return true
-        case Part:
+        case .Part:
+            b := b.as.part
             return is_building_free(b.main_pos, conveyor)
-        case CoalStation:
+        case .CoalStation:
+            b := b.as.coal_station
             return b.fuel_slot.count < MAX_FUEL && conveyor.ore_type == .Coal
-        case nil:
+        case .None:
             return false
     }
     nucoib_panic("Unreachable: ", building_at(pos))
@@ -804,9 +836,12 @@ update :: proc() {
 
     for i := 0; i < WORLD_WIDTH; i += 1 {
         for j := 0; j < WORLD_HEIGHT; j += 1 {
-            switch &building in s.buildings[i][j] {
-                case nil:
-                case Drill:
+            building := &s.buildings[i][j]
+            
+            switch building.type {
+                case .None:
+                case .Drill:
+                    building := &building.as.drill
                     building.active = false
                     if building.fuel_time < 0 && building.fuel_slot.count > 0 {
                         building.fuel_time = FUEL_TIME
@@ -817,7 +852,7 @@ update :: proc() {
                         next_ore, ok := &s.ores[i + int(building.next_tile) % 2][j + int(building.next_tile) / 2].(Ore)
                         if !ok do continue
                         if building.drilling_timer >= DRILLING_TIME {
-                            if drill_ore_count(building) < DRILL_CAPACITY {
+                            if drill_ore_count(building^) < DRILL_CAPACITY {
                                 if next_ore.type != .None {
                                     ores := building.ores[:]
                                     if !slice.is_empty(ores) && slice.last(ores).type == next_ore.type {
@@ -833,7 +868,7 @@ update :: proc() {
                             }
                             building.drilling_timer = 0
                         }
-                        if drill_ore_count(building) < DRILL_CAPACITY {
+                        if drill_ore_count(building^) < DRILL_CAPACITY {
                             building.fuel_time -= s.dt
                             building.active = true
                         }
@@ -856,16 +891,19 @@ update :: proc() {
                         }
                         for pos in dump_area {
                             if check_boundaries(pos, WORLD_RECT) {
-                                #partial switch &b in building_ptr_at(pos) {
-                                    case Conveyor:
-                                        if b.ore_type == .None && drill_ore_count(building) > 0 {
+                                b := building_ptr_at(pos)
+                                #partial switch b.type {
+                                    case .Conveyor:
+                                        b := &b.as.conveyor
+                                        if b.ore_type == .None && drill_ore_count(building^) > 0 {
                                             b.transportation_progress = 0.5
                                             b.ore_type = building.ores[0].type
                                             building.ores[0].count -= 1
                                             if building.ores[0].count <= 0 do ordered_remove(&building.ores, 0)
                                         }
-                                    case Splitter:
-                                        if b.ore_type == .None && drill_ore_count(building) > 0 {
+                                    case .Splitter:
+                                        b := &b.as.splitter
+                                        if b.ore_type == .None && drill_ore_count(building^) > 0 {
                                             b.transportation_progress = 0.5
                                             b.ore_type = building.ores[0].type
                                             building.ores[0].count -= 1
@@ -875,9 +913,10 @@ update :: proc() {
                             }
                         }
                     }
-                case Conveyor:
+                case .Conveyor:
+                    building := &building.as.conveyor
                     if building.ore_type == .None do continue
-                    is_free := is_building_free(offsets[building.direction] + {i, j}, &building)
+                    is_free := is_building_free(offsets[building.direction] + {i, j}, building)
                     switch building.direction {
                         case .Right:
                             if !is_free && building.transportation_progress.x < 0.5 || is_free {
@@ -917,9 +956,10 @@ update :: proc() {
                             }
                     }
                     next_pos := offsets[building.direction] + {i, j}
-                    transport_ore(next_pos, &building)
+                    transport_ore(next_pos, building)
                     building.transportation_progress = rl.Vector2Clamp(building.transportation_progress, 0, 1)
-                case Splitter:
+                case .Splitter:
+                    building := &building.as.splitter
                     if building.ore_type == .None do continue
 
                     good_direction: {
@@ -930,7 +970,7 @@ update :: proc() {
                                 direction = Direction((int(direction) + 1) % len(Direction))
                                 continue
                             }
-                            if building_at(offsets[direction] + {i, j}) != nil && is_building_free(offsets[direction] + {i, j}, &building) {
+                            if building_at(offsets[direction] + {i, j}).type != .None && is_building_free(offsets[direction] + {i, j}, building) {
                                 building.next = direction
                                 break good_direction
                             }
@@ -939,11 +979,11 @@ update :: proc() {
                     }
                     can_transfer := true
 
-                    check: if building_at(offsets[building.next] + {i, j}) == nil {
+                    check: if building_at(offsets[building.next] + {i, j}).type == .None {
                         for direction in Direction {
                             if direction == opposite[building.direction] do continue
 
-                            if building_at(offsets[direction] + {i, j}) != nil {
+                            if building_at(offsets[direction] + {i, j}).type != .None {
                                 building.next = direction
                                 break check
                             }
@@ -952,7 +992,7 @@ update :: proc() {
                     }
 
                     if can_transfer {
-                        is_free := is_building_free(offsets[building.next] + {i, j}, &building)
+                        is_free := is_building_free(offsets[building.next] + {i, j}, building)
                         switch building.next {
                             case .Right:
                                 if !is_free && building.transportation_progress.x < 0.5 || is_free {
@@ -996,12 +1036,12 @@ update :: proc() {
                         // Kinda BRUH
                         direction := building.direction
                         building.direction = building.next
-                        transport_ore(next_pos, &building)
+                        transport_ore(next_pos, building)
                         building.direction = direction
 
                         if building.transportation_progress == 0 {
                             building.next = Direction((int(building.next) + 1) % len(Direction))
-                            for building_at(offsets[building.next] + {i, j}) == nil || building.next == opposite[building.direction] {
+                            for building_at(offsets[building.next] + {i, j}).type == .None || building.next == opposite[building.direction] {
                                 building.next = Direction((int(building.next) + 1) % len(Direction))
                             }
                         }
@@ -1047,7 +1087,8 @@ update :: proc() {
                         }
                     }
 
-                case CoalStation:
+                case .CoalStation:
+                    building := &building.as.coal_station
                     building.energy = 0
                     building.active = false
                     if building.fuel_time < 0 && building.fuel_slot.count > 0 {
@@ -1060,8 +1101,8 @@ update :: proc() {
                         building.energy = 100
                         building.fuel_time -= s.dt
                     }
-                case Base:
-                case Part:
+                case .Base:
+                case .Part:
             }
         }
     }
@@ -1083,8 +1124,10 @@ check_conveyor_progress :: proc(conveyor: Conveyor) -> bool {
 
 transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
     if check_boundaries(next_pos, WORLD_RECT) {
-        switch &nb in building_ptr_at(next_pos) {
-            case Drill:
+        nb := building_ptr_at(next_pos)
+        switch nb.type {
+            case .Drill:
+                nb := &nb.as.drill
                 if check_conveyor_progress(conveyor^) && conveyor.ore_type == .Coal && nb.fuel_slot.count < MAX_FUEL {
                     if nb.fuel_slot == {} {
                         nb.fuel_slot = {.Coal, 1}
@@ -1094,7 +1137,8 @@ transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
                     conveyor.ore_type = .None
                     conveyor.transportation_progress = 0
                 }
-            case Conveyor:
+            case .Conveyor:
+                nb := &nb.as.conveyor
                 if nb.ore_type == .None && nb.direction != opposite[conveyor.direction] {
                     if check_conveyor_progress(conveyor^) {
                         switch conveyor.direction {
@@ -1112,7 +1156,8 @@ transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
                         conveyor.transportation_progress = 0
                     }
                 }
-            case Splitter:
+            case .Splitter:
+                nb := &nb.as.splitter
                 if nb.ore_type == .None && nb.direction != opposite[conveyor.direction] {
                     if check_conveyor_progress(conveyor^) {
                         switch conveyor.direction {
@@ -1130,15 +1175,18 @@ transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
                         conveyor.transportation_progress = 0
                     }
                 }
-            case Base:
+            case .Base:
+                nb := &nb.as.base
                 if check_conveyor_progress(conveyor^) {
                     nb.ores[conveyor.ore_type] += 1
                     conveyor.ore_type = .None
                     conveyor.transportation_progress = 0
                 }
-            case Part:
+            case .Part:
+                nb := &nb.as.part
                 transport_ore(nb.main_pos, conveyor)
-            case CoalStation:
+            case .CoalStation:
+                nb := &nb.as.coal_station
                 if check_conveyor_progress(conveyor^) && conveyor.ore_type == .Coal && nb.fuel_slot.count < MAX_FUEL {
                     if nb.fuel_slot == {} {
                         nb.fuel_slot = {.Coal, 1}
@@ -1148,6 +1196,7 @@ transport_ore :: proc(next_pos: Vec2i, conveyor: ^Conveyor) {
                     conveyor.ore_type = .None
                     conveyor.transportation_progress = 0
                 }
+            case .None:
         }
     }
 }
@@ -1198,53 +1247,67 @@ screen_to_grid :: proc(screen_pos: rl.Vector2) -> Vec2i {
 }
 
 building_to_string :: proc(building: Building) -> string {
-    switch b in building {
-        case Drill:
+    switch building.type {
+        case .Drill:
+            b := building.as.drill
             if len(b.ores) == 0 {
                 return tbprintf("Drill[:]")
             } else {
                 return tbprintf("Drill[%v:%v]", b.ores[0].type, b.ores[0].count)
             }
-        case nil:         return tbprintf("None")
-        case Conveyor:    return tbprintf("Conveyor_%v[%v]", b.direction, b.ore_type)
-        case Splitter:    return tbprintf("Splitter_%v[%v]", b.direction, b.ore_type)
-        case Base:        return tbprintf("Base")
-        case Part:        return building_to_string(building_at(b.main_pos))
-        case CoalStation: return tbprintf("CoalStation[%v:%v]", b.energy, b.fuel_slot.count)
-        case:             nucoib_panic("Unknown building type %v", b)
+        case .None:
+            return tbprintf("None")
+        case .Conveyor:
+            b := building.as.conveyor
+            return tbprintf("Conveyor_%v[%v]", b.direction, b.ore_type)
+        case .Splitter:
+            b := building.as.splitter
+            return tbprintf("Splitter_%v[%v]", b.direction, b.ore_type)
+        case .Base:
+            return tbprintf("Base")
+        case .Part:
+            b := building.as.part
+            return building_to_string(building_at(b.main_pos))
+        case .CoalStation:
+            b := building.as.coal_station
+            return tbprintf("CoalStation[%v:%v]", b.energy, b.fuel_slot.count)
+        case: 
+            nucoib_panic("WTF")
     }
 }
 
 delete_building :: proc(pos: Vec2i) {
-    switch building in building_ptr_at(pos) {
-        case nil:
-        case Drill:
-            building_ptr_at(pos + {0, 0})^ = nil
-            building_ptr_at(pos + {1, 0})^ = nil
-            building_ptr_at(pos + {1, 1})^ = nil
-            building_ptr_at(pos + {0, 1})^ = nil
+    building := building_ptr_at(pos)
+    switch building.type  {
+        case .None:
+        case .Drill:
+            building_ptr_at(pos + {0, 0}).type = .None
+            building_ptr_at(pos + {1, 0}).type = .None
+            building_ptr_at(pos + {1, 1}).type = .None
+            building_ptr_at(pos + {0, 1}).type = .None
             for ore in get_resources(Drill) {
                 s.base.ores[ore.type] += ore.count
             }
-        case Conveyor:
-            building_ptr_at(pos)^ = nil
+        case .Conveyor:
+            building_ptr_at(pos).type = .None
             for ore in get_resources(Conveyor) {
                 s.base.ores[ore.type] += ore.count
             }
-        case Splitter:
-            building_ptr_at(pos)^ = nil
+        case .Splitter:
+            building_ptr_at(pos).type = .None
             for ore in get_resources(Splitter) {
                 s.base.ores[ore.type] += ore.count
             }
-        case Base:
+        case .Base:
             // You cannot delete the Base
-        case Part:
+        case .Part:
+            building := &building.as.part
             delete_building(building.main_pos)
-        case CoalStation:
-            building_ptr_at(pos + {0, 0})^ = nil
-            building_ptr_at(pos + {1, 0})^ = nil
-            building_ptr_at(pos + {1, 1})^ = nil
-            building_ptr_at(pos + {0, 1})^ = nil
+        case .CoalStation:
+            building_ptr_at(pos + {0, 0}).type = .None
+            building_ptr_at(pos + {1, 0}).type = .None
+            building_ptr_at(pos + {1, 1}).type = .None
+            building_ptr_at(pos + {0, 1}).type = .None
             for ore in get_resources(CoalStation) {
                 s.base.ores[ore.type] += ore.count
             }
@@ -1262,10 +1325,13 @@ new_rect :: proc(pos: rl.Vector2, size: rl.Vector2, scale: f32 = s.scale) -> rl.
 
 draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
     pos := world_to_screen(world_pos)
-    switch &building in building_ptr_at(world_pos) {
-        case nil:
-        case Drill:
+    building := building_ptr_at(world_pos)
+    
+    switch building.type {
+        case .None:
+        case .Drill:
             // TODO: less cringe code, but still need to make better MAYBE
+            building := &building.as.drill
             if building.active {
                 offset_diff := building.target_offset - building.current_offset
                 offset_diff_abs := rl.Vector2Length(offset_diff)
@@ -1290,18 +1356,21 @@ draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
             dest := new_rect(pos + building.current_offset, TILE_DRILL_SIZE)
             base_angle := f32(building.direction) * 90
             draw_sprite_pro(TILE_DRILL, dest, BG_COLOR, DRILL_COLOR, reverse, base_angle + building.current_rotation)
-        case Conveyor:
+        case .Conveyor:
+            building := &building.as.conveyor
             dest := new_rect(pos, TILE_CONVEYOR_SIZE)
             angle := f32(building.direction) * 90
             draw_sprite_pro(TILE_CONVEYOR, dest, rl.GRAY, CONVEYOR_COLOR, reverse, angle)
-        case Splitter:
+        case .Splitter:
+            building := &building.as.splitter
             dest := new_rect(pos, TILE_SPLITTER_SIZE)
             angle := f32(building.direction) * 90
             draw_sprite_pro(TILE_SPLITTER, dest, rl.GRAY, SPLITTER_COLOR, reverse, angle)
-        case Base:
+        case .Base:
             dest := new_rect(pos, TILE_MAIN_SIZE)
             draw_sprite_pro(TILE_MAIN, dest, BG_COLOR, BASE_COLOR, reverse, 0)
-        case CoalStation:
+        case .CoalStation:
+            building := &building.as.coal_station
             dest: rl.Rectangle
             if building.active {
                 SQUASH_SPEED :: f32(8)
@@ -1323,7 +1392,8 @@ draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
                 }
             }
             draw_sprite_pro(TILE_COAL_STATION, dest, BG_COLOR, COAL_STATION_COLOR, reverse, 0)
-        case Part:
+        case .Part:
+            building := &building.as.part
             if reverse do draw_building(building.main_pos, reverse)
     }
 }
@@ -1339,7 +1409,7 @@ draw :: proc() {
     // Draw ores
     for i := first_col; i < last_col; i += 1 {
         for j := first_row; j < last_row; j += 1 {
-            if s.buildings[i][j] != nil do continue
+            if s.buildings[i][j].type != .None do continue
 
             pos := world_to_screen({i, j})
             under_player := s.player.pos == {i, j}
@@ -1366,11 +1436,12 @@ draw :: proc() {
     for i := first_col; i < last_col; i += 1 {
         for j := first_row; j < last_row; j += 1 {
             building: ^Conveyor
-            #partial switch &b in s.buildings[i][j] {
-                case Conveyor:
-                    building = &b
-                case Splitter:
-                    building = &b
+            b := s.buildings[i][j]
+            #partial switch b.type {
+                case .Conveyor:
+                    building = &b.as.conveyor
+                case .Splitter:
+                    building = &b.as.splitter
             }
             if building != nil && building.ore_type != .None {
                 pos := world_to_screen({i, j})
@@ -1387,17 +1458,18 @@ draw :: proc() {
 
     // Player
     ore, ok := s.ores[s.player.pos.x][s.player.pos.y].(Ore)
-    if ok && ore.type == .None && building_at(s.player.pos) == nil {
+    if ok && ore.type == .None && building_at(s.player.pos).type == .None {
         dest := new_rect(world_to_screen(s.player.pos), TILE_SIZE)
         draw_sprite_pro(TILE_ORE, dest, rl.WHITE, rl.WHITE, false, 0)
     }
 
     // TODO: nuke this shit
-    if _, station_ok := building_at(s.player.pos).(CoalStation); station_ok  {
+    if building_at(s.player.pos).type == .CoalStation {
         rl.DrawCircleLinesV(world_to_screen(s.player.pos + 1), 20 * s.scale * TILE_SIZE, rl.YELLOW)
     }
-    if part, part_ok := building_at(s.player.pos).(Part); part_ok {
-        if _, station_ok := building_at(part.main_pos).(CoalStation); station_ok {
+    if building_at(s.player.pos).type == .Part {
+        part := building_at(s.player.pos).as.part
+        if building_at(part.main_pos).type == .CoalStation {
             rl.DrawCircleLinesV(world_to_screen(part.main_pos + 1), 20 * s.scale * TILE_SIZE, rl.YELLOW)
         }
     }
@@ -1587,6 +1659,7 @@ draw :: proc() {
                     pos := rl.Vector2{panel.rect.x + RUNE_WIDTH * UI_SCALE, panel.rect.y + RUNE_HEIGHT * UI_SCALE}
                     draw_text(fps_text, pos)
                 }
+            case .Building: 
         }
     }
 }
@@ -1822,6 +1895,7 @@ main :: proc() {
         .Direction = {priority = 1, anchor = {.Right, .Down}, active = true},
         .Use       = {priority = 0, anchor = {.Left, .Up, .Right, .Down}},
         .Stood     = {priority = 4, anchor = {.Left, .Up}},
+        .Building  = {priority = 0, anchor = {.Left, .Up, .Right, .Down}},
     }
 
     s.player.pos.x = WORLD_WIDTH / 2
@@ -1830,12 +1904,13 @@ main :: proc() {
     generate_world()
 
     base_pos := Vec2i{WORLD_WIDTH, WORLD_HEIGHT} / 2 - 1
-    building_ptr_at(base_pos)^ = Base{}
-    s.base = &building_ptr_at(base_pos).(Base)
+    building_ptr_at(base_pos).type = .Base
+    s.base = &building_ptr_at(base_pos).as.base
     for i := base_pos.x; i <= base_pos.x + 2; i += 1 {
         for j := base_pos.y; j <= base_pos.y + 2; j += 1 {
             if i == base_pos.x && j == base_pos.y do continue
-            s.buildings[i][j] = Part{base_pos}
+            s.buildings[i][j].type = .Part
+            s.buildings[i][j].as.part = {base_pos}
         }
     }
 
