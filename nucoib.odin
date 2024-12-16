@@ -75,7 +75,7 @@ WARNING_COLOR          :: rl.Color{250, 218, 94, 255}
 ERROR_COLOR            :: rl.Color{240, 90, 90, 255}
 PANIC_COLOR            :: rl.Color{255, 182, 30, 255}
 
-BG_COLOR               :: rl.Color {0x20, 0x20, 0x20, 0xFF}
+BG_COLOR               :: rl.Color{0x20, 0x20, 0x20, 0xFF}
 DRILL_COLOR            :: rl.Color{247, 143, 168, 255}
 BOULDER_COLOR          :: rl.Color{174, 128, 128, 255}
 SPLITTER_COLOR         :: rl.LIGHTGRAY
@@ -112,7 +112,7 @@ Building :: struct {
         base: Base,
         part: Part,
         coal_station: CoalStation,
-    }
+    },
 }
 
 Rect :: struct {
@@ -211,19 +211,6 @@ Direction :: enum u8 {
     Up,
 }
 
-ListConf :: struct {
-    rect:     rl.Rectangle,
-    bg_color: rl.Color,
-    fg_color: rl.Color,
-    title:    string,
-    content:  []ListElement,
-}
-
-ListElement :: struct {
-    text:    string,
-    reverse: bool,
-}
-
 State :: struct {
     ores:                 ^Ores,
     buildings:            ^Buildings,
@@ -295,7 +282,7 @@ write_save :: proc() -> os.Error {
         for j := 0; j < WORLD_HEIGHT; j += 1 {
             if s.buildings[i][j].type == .Drill {
                 os.write(file, mem.ptr_to_bytes(&Vec2i{i, j})) or_return
-                
+
                 drill := &s.buildings[i][j].as.drill
                 ores_length := len(drill.ores)
                 os.write(file, mem.ptr_to_bytes(&ores_length)) or_return
@@ -322,8 +309,8 @@ read_save :: proc() -> os.Error {
         n, err := os.read(file, mem.ptr_to_bytes(&drill_pos))
         if err == os.ERROR_EOF || n == 0 do break
         if err != nil do return err
-        
-        
+
+
         assert(building_ptr_at(drill_pos).type == .Drill)
         drill := &building_ptr_at(drill_pos).as.drill
         drill.ores = {}
@@ -545,7 +532,7 @@ input :: proc() {
         recalculate_grid_size()
     }
 
-    
+
     if rl.IsKeyPressed(.R) {
         s.direction = Direction((int(s.direction) + 1) % len(Direction))
     }
@@ -566,7 +553,7 @@ input :: proc() {
         if rl.IsKeyPressed(.DOWN) {
             s.selected_building = BuildingType((int(s.selected_building) + 1))
             // bullshit "-2"
-            if s.selected_building > max(BuildingType)-BuildingType(2) do s.selected_building = BuildingType(1) 
+            if s.selected_building > max(BuildingType)-BuildingType(2) do s.selected_building = BuildingType(1)
         }
         if rl.IsKeyPressed(.UP) {
             s.selected_building = BuildingType(int(s.selected_building) - 1)
@@ -606,7 +593,7 @@ input :: proc() {
                     building.type = .Conveyor
                     building.as.conveyor = {direction = s.direction}
                 }
-            
+
             case .Splitter:
                 building := building_ptr_at(s.player.pos)
 
@@ -618,7 +605,7 @@ input :: proc() {
                     building.type = .Splitter
                     building.as.splitter = {direction = s.direction, next = s.direction}
                 }
-            
+
             case .CoalStation:
                 if check_boundaries(s.player.pos + 1, WORLD_RECT) {
                     x := s.player.pos.x
@@ -857,7 +844,7 @@ update :: proc() {
     for i := 0; i < WORLD_WIDTH; i += 1 {
         for j := 0; j < WORLD_HEIGHT; j += 1 {
             building := &s.buildings[i][j]
-            
+
             switch building.type {
                 case .None:
                 case .Drill:
@@ -1291,7 +1278,7 @@ building_to_string :: proc(building: Building) -> string {
         case .CoalStation:
             b := building.as.coal_station
             return tbprintf("CoalStation[%v:%v]", b.energy, b.fuel_slot.count)
-        case: 
+        case:
             nucoib_panic("WTF")
     }
 }
@@ -1346,7 +1333,7 @@ new_rect :: proc(pos: rl.Vector2, size: rl.Vector2, scale: f32 = s.scale) -> rl.
 draw_building :: proc(world_pos: Vec2i, reverse: bool = false) {
     pos := world_to_screen(world_pos)
     building := building_ptr_at(world_pos)
-    
+
     switch building.type {
         case .None:
         case .Drill:
@@ -1516,28 +1503,21 @@ draw :: proc() {
         #partial switch panel_idx {
             case .None:
             case .Base:
-                elements: [len(OreType)]ListElement
+                elements: [len(OreType)]string
                 for ore_tile in OreType {
-                    elements[ore_tile] = {tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile]), false}
+                    elements[ore_tile] = tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile])
                 }
 
                 str_length: int
                 for element in elements {
-                    if len(element.text) > str_length do str_length = len(element.text)
+                    if len(element) > str_length do str_length = len(element)
                 }
 
                 panel.rect.width = f32(str_length + 2) * RUNE_WIDTH * UI_SCALE
                 panel.rect.height = (len(OreType) + 2) * RUNE_HEIGHT * UI_SCALE
 
                 if panel.active {
-                    conf := ListConf{
-                        panel.rect,
-                        BG_COLOR,
-                        rl.WHITE,
-                        "MAIN",
-                        elements[:],
-                    }
-                    draw_list(conf)
+                    draw_list(panel.rect, BG_COLOR, rl.WHITE, "MAIN", elements[:], -1)
                 }
             case .Direction:
                 panel.rect.width = DIRECTION_MENU_WIDTH * RUNE_WIDTH * UI_SCALE
@@ -1555,44 +1535,33 @@ draw :: proc() {
                     case .Up:    draw_char('~' + 2, pos, fg_color = rl.SKYBLUE)
                 }
             case .Stood:
-                elements: [2]ListElement
-                elements[0] = {building_to_string(building_at(s.player.pos)), false}
+                elements: [2]string
+                elements[0] = building_to_string(building_at(s.player.pos))
                 title := "STOOD-ON"
 
                 ore, ok := &s.ores[s.player.pos.x][s.player.pos.y].(Ore)
                 if !ok do continue
                 #partial switch ore.type {
                     case .None:
-                        elements[1] = {tbprintf("None"), false}
+                        elements[1] = tbprintf("None")
                     case:
-                        elements[1] = {tbprintf("%v: %v", ore.type, ore.count), false}
+                        elements[1] = tbprintf("%v: %v", ore.type, ore.count)
                 }
-                panel.rect.width = f32(max(len(elements[0].text), len(elements[1].text), len(title) + 2) + 2) * RUNE_WIDTH * UI_SCALE
+                panel.rect.width = f32(max(len(elements[0]), len(elements[1]), len(title) + 2) + 2) * RUNE_WIDTH * UI_SCALE
                 panel.rect.height = STOOD_MENU_HEIGHT * RUNE_HEIGHT * UI_SCALE
 
                 if panel.active {
                     // Ore text
-                    conf := ListConf {
-                        panel.rect,
-                        BG_COLOR,
-                        rl.WHITE,
-                        title,
-                        elements[:],
-                    }
-                    draw_list(conf)
+                    draw_list(panel.rect, BG_COLOR, rl.WHITE, title, elements[:], -1)
                 }
             case .Use:
-                elements: [len(OreType)]ListElement
+                elements: [len(OreType)]string
                 panel.rect.width = s.panels[.Base].rect.width + (SLOT_MENU_WIDTH - 1) * RUNE_WIDTH * UI_SCALE
                 panel.rect.height = s.panels[.Base].rect.height
 
                 // Use menu
                 for ore_tile in OreType {
-                    if OreType(s.selected_ore) == ore_tile {
-                        elements[ore_tile] = {tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile]), true}
-                    } else {
-                        elements[ore_tile] = {tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile]), false}
-                    }
+                    elements[ore_tile] = tbprintf("%v: %v", ore_tile, s.base.ores[ore_tile])
                 }
 
                 if panel.active {
@@ -1660,14 +1629,7 @@ draw :: proc() {
                         s.panels[.Base].rect.width,
                         s.panels[.Base].rect.height,
                     }
-                    conf := ListConf{
-                        left_rect,
-                        BG_COLOR,
-                        rl.WHITE,
-                        "STORAGE",
-                        elements[:],
-                    }
-                    draw_list(conf)
+                    draw_list(left_rect, BG_COLOR, rl.WHITE, "STORAGE", elements[:], int(s.selected_ore))
                 }
             case .Fps:
                 fps_text := tbprintf("%v", rl.GetFPS())
@@ -1681,28 +1643,17 @@ draw :: proc() {
                 }
             case .Building:
                 // bullshit "-3"
-                elements: [len(BuildingType)-3]ListElement
+                elements: [len(BuildingType) - 3]string
                 text_length := 0
                 for i := 0; i < len(elements); i += 1 {
-                    if s.selected_building == BuildingType(i+1) {
-                        elements[i] = {tbprintf("%v", BuildingType(i+1)), true}
-                    } else {
-                        elements[i] = {tbprintf("%v", BuildingType(i+1)), false}
-                    }
-                    text_length = max(text_length, len(elements[i].text))
-                } 
+                    elements[i] = tbprintf("%v", BuildingType(i + 1))
+                    text_length = max(text_length, len(elements[i]))
+                }
                 panel.rect.width = (f32(text_length) + 5) * RUNE_WIDTH * UI_SCALE
                 panel.rect.height = (len(elements) + 2) * RUNE_HEIGHT * UI_SCALE
 
                 if panel.active {
-                    conf := ListConf{
-                        panel.rect,
-                        BG_COLOR,
-                        rl.WHITE,
-                        "BUILDINGS",
-                        elements[:],
-                    }
-                    draw_list(conf)
+                    draw_list(panel.rect, BG_COLOR, rl.WHITE, "BUILDINGS", elements[:], int(s.selected_building) - 1)
                 }
         }
     }
@@ -1719,14 +1670,14 @@ get_ore_color :: proc(ore_type: OreType) -> rl.Color {
     }
 }
 
-draw_list :: proc(conf: ListConf) {
-    draw_border(conf.rect, conf.bg_color, conf.fg_color, conf.title)
-    for element, i in conf.content {
+draw_list :: proc(rect: rl.Rectangle, bg_color: rl.Color, fg_color: rl.Color, title: string, content: []string, selected: int) {
+    draw_border(rect, bg_color, fg_color, title)
+    for element, i in content {
         pos := rl.Vector2 {
-            conf.rect.x + RUNE_WIDTH * UI_SCALE,
-            conf.rect.y + f32(int(i) + 1) * RUNE_HEIGHT * UI_SCALE,
+            rect.x + RUNE_WIDTH * UI_SCALE,
+            rect.y + f32(int(i) + 1) * RUNE_HEIGHT * UI_SCALE,
         }
-        draw_text(element.text, pos, reverse = element.reverse)
+        draw_text(element, pos, i == selected)
     }
 }
 
